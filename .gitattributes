@@ -1,0 +1,26 @@
+# Normalize line endings: auto-detect text, LF in the repo
+* text=auto eol=lf
+
+# Explicitly text
+*.rs      text
+*.toml    text
+*.nix     text
+*.md      text
+*.xml     text
+*.json    text
+*.lock    text
+
+# Cargo.lock: keep committed, hide from diffs, treat as generated
+Cargo.lock  linguist-generated=true
+
+# Windows scripts keep CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# Binary files (never touch)
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.pdf     binary

@@ -1,0 +1,237 @@
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+const MAX_HISTORY: usize = 10;
+
+/// Connection details for one qBittorrent WebUI. An empty username means
+/// qBt's "bypass auth for localhost" mode (no login request is made).
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct QbtProfile {
+    pub endpoint: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+}
+
+impl std::fmt::Debug for QbtProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QbtProfile")
+            .field("endpoint", &self.endpoint)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Persistent app state. Every field carries #[serde(default)] so files
+/// written by older versions keep loading as settings are added.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Config {
+    #[serde(default)]
+    pub path_history: Vec<String>,
+    #[serde(default)]
+    pub qbt: std::collections::BTreeMap<String, QbtProfile>,
+}
+
+impl Config {
+    /// Loading never fails — state is a convenience and must never break a
+    /// run. A missing (or unreadable) file yields defaults silently. A file
+    /// that is *present but unparseable* is a different story: silently
+    /// defaulting would let the next `save()` overwrite it and destroy the
+    /// saved qBittorrent profiles (passwords included). So the bad file is
+    /// moved aside to `config.toml.bak` and the user is told where it went,
+    /// before defaults are returned.
+    pub fn load(dir: &Path) -> Config {
+        let path = dir.join("config.toml");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Config::default();
+        };
+        match toml::from_str(&text) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                let backup = dir.join("config.toml.bak");
+                let rescued = std::fs::rename(&path, &backup).is_ok();
+                let whereto = if rescued {
+                    format!(" — your previous file was moved to {}", backup.display())
+                } else {
+                    String::new()
+                };
+                eprintln!(
+                    "warning: {} is unreadable and was ignored ({e}){whereto}",
+                    path.display()
+                );
+                Config::default()
+            }
+        }
+    }
+
+    pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
+        std::fs::create_dir_all(dir)?;
+        let body = toml::to_string_pretty(self)?;
+        let target = dir.join("config.toml");
+        // The file holds qBt passwords: create the replacement with
+        // owner-only permissions BEFORE writing any secret bytes, then
+        // swap it into place atomically (also tightens a pre-existing
+        // looser-mode file from older versions).
+        let tmp = dir.join("config.toml.tmp");
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let _ = std::fs::remove_file(&tmp);
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            file.write_all(body.as_bytes())?;
+        }
+        #[cfg(not(unix))]
+        std::fs::write(&tmp, &body)?;
+        std::fs::rename(&tmp, &target)?;
+        Ok(())
+    }
+
+    pub fn record_path(&mut self, path: &str) {
+        self.path_history.retain(|p| p != path);
+        self.path_history.insert(0, path.to_string());
+        self.path_history.truncate(MAX_HISTORY);
+    }
+}
+
+pub fn config_dir() -> PathBuf {
+    let xdg = std::env::var("XDG_CONFIG_HOME").ok();
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    config_dir_from(xdg.as_deref(), &home)
+}
+
+fn config_dir_from(xdg: Option<&str>, home: &str) -> PathBuf {
+    match xdg {
+        Some(x) if !x.is_empty() => PathBuf::from(x).join("mikan"),
+        _ => PathBuf::from(home).join(".config").join("mikan"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn load_missing_file_gives_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::load(dir.path());
+        assert!(cfg.path_history.is_empty());
+    }
+
+    #[test]
+    fn load_corrupt_file_gives_default_and_backs_up_the_bad_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), "not [valid toml").unwrap();
+        let cfg = Config::load(dir.path());
+        assert!(cfg.path_history.is_empty());
+        // The unparseable file must be preserved (not silently dropped, which
+        // the next save() would clobber), and moved out of the load path.
+        assert!(!dir.path().join("config.toml").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.toml.bak")).unwrap(),
+            "not [valid toml"
+        );
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.record_path("/a/b");
+        cfg.record_path("/c/d");
+        cfg.save(dir.path()).unwrap();
+        let loaded = Config::load(dir.path());
+        assert_eq!(loaded.path_history, vec!["/c/d".to_string(), "/a/b".to_string()]);
+    }
+
+    #[test]
+    fn save_creates_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("deep").join("mikan");
+        Config::default().save(&nested).unwrap();
+        assert!(nested.join("config.toml").exists());
+    }
+
+    #[test]
+    fn record_path_dedups_and_moves_to_front() {
+        let mut cfg = Config::default();
+        cfg.record_path("/a");
+        cfg.record_path("/b");
+        cfg.record_path("/a");
+        assert_eq!(cfg.path_history, vec!["/a".to_string(), "/b".to_string()]);
+    }
+
+    #[test]
+    fn record_path_caps_at_ten() {
+        let mut cfg = Config::default();
+        for i in 0..12 {
+            cfg.record_path(&format!("/p{i}"));
+        }
+        assert_eq!(cfg.path_history.len(), 10);
+        assert_eq!(cfg.path_history[0], "/p11");
+        assert_eq!(cfg.path_history[9], "/p2");
+    }
+
+    #[test]
+    fn config_dir_prefers_nonempty_xdg() {
+        assert_eq!(config_dir_from(Some("/xdg"), "/home/u"), PathBuf::from("/xdg/mikan"));
+        assert_eq!(config_dir_from(None, "/home/u"), PathBuf::from("/home/u/.config/mikan"));
+        assert_eq!(config_dir_from(Some(""), "/home/u"), PathBuf::from("/home/u/.config/mikan"));
+    }
+
+    #[test]
+    fn qbt_profile_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.qbt.insert(
+            "seedbox".to_string(),
+            QbtProfile {
+                endpoint: "http://10.0.0.2:8080".to_string(),
+                username: "admin".to_string(),
+                password: "secret".to_string(),
+            },
+        );
+        cfg.save(dir.path()).unwrap();
+        let loaded = Config::load(dir.path());
+        assert_eq!(loaded.qbt.get("seedbox"), cfg.qbt.get("seedbox"));
+    }
+
+    #[test]
+    fn old_config_without_qbt_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), "path_history = [\"/a\"]\n").unwrap();
+        let cfg = Config::load(dir.path());
+        assert_eq!(cfg.path_history, vec!["/a".to_string()]);
+        assert!(cfg.qbt.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_sets_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        Config::default().save(dir.path()).unwrap();
+        let mode = std::fs::metadata(dir.path().join("config.toml")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_tightens_preexisting_loose_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "path_history = []\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Config::default().save(dir.path()).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}
