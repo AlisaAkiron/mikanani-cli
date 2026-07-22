@@ -146,8 +146,12 @@ is local/LAN.
 
 ## Configuration
 
-State lives at `$XDG_CONFIG_HOME/mikan/config.toml` (falling back to
-`~/.config/mikan/config.toml`) and holds:
+The config file `config.toml` lives at:
+
+- **Linux / macOS** — `$XDG_CONFIG_HOME/mikanani-cli/` (falling back to `~/.config/mikanani-cli/`)
+- **Windows** — `%APPDATA%\mikanani-cli\`
+
+It holds:
 
 - **`path_history`** — your last 10 export paths, for autocomplete.
 - **`qbt`** — saved qBittorrent profiles (endpoint, username, password).

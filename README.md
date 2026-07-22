@@ -142,8 +142,12 @@ mikan --proxy http://127.0.0.1:7890 "https://mikanani.me/RSS/..."
 
 ## 配置
 
-状态保存在 `$XDG_CONFIG_HOME/mikan/config.toml`（若未设置则回退到
-`~/.config/mikan/config.toml`），其中包含：
+配置文件 `config.toml` 的位置：
+
+- **Linux / macOS**——`$XDG_CONFIG_HOME/mikanani-cli/`（未设置时回退到 `~/.config/mikanani-cli/`）
+- **Windows**——`%APPDATA%\mikanani-cli\`
+
+其中包含：
 
 - **`path_history`**——你最近使用的 10 个导出路径，用于自动补全。
 - **`qbt`**——已保存的 qBittorrent 配置（地址、用户名、密码）。

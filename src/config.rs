@@ -101,15 +101,36 @@ impl Config {
 }
 
 pub fn config_dir() -> PathBuf {
+    // Read every relevant variable up front; the resolver picks per platform.
+    let appdata = std::env::var("APPDATA").ok();
     let xdg = std::env::var("XDG_CONFIG_HOME").ok();
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    config_dir_from(xdg.as_deref(), &home)
+    let home = std::env::var("HOME").ok();
+    resolve_config_dir(cfg!(windows), appdata.as_deref(), xdg.as_deref(), home.as_deref())
 }
 
-fn config_dir_from(xdg: Option<&str>, home: &str) -> PathBuf {
+/// Resolve the config directory. `windows` selects the platform convention —
+/// passed in (via `cfg!(windows)`) rather than read inside, so both branches
+/// compile and stay unit-testable on any host:
+///   - Windows: `%APPDATA%\mikanani-cli` (roaming app data).
+///   - Linux/macOS: `$XDG_CONFIG_HOME/mikanani-cli`, else `$HOME/.config/mikanani-cli`.
+/// Each branch falls back to the current directory when its variable is
+/// missing, so a run never panics for want of an environment variable.
+fn resolve_config_dir(
+    windows: bool,
+    appdata: Option<&str>,
+    xdg: Option<&str>,
+    home: Option<&str>,
+) -> PathBuf {
+    if windows {
+        let base = match appdata {
+            Some(a) if !a.is_empty() => a,
+            _ => ".",
+        };
+        return PathBuf::from(base).join("mikanani-cli");
+    }
     match xdg {
-        Some(x) if !x.is_empty() => PathBuf::from(x).join("mikan"),
-        _ => PathBuf::from(home).join(".config").join("mikan"),
+        Some(x) if !x.is_empty() => PathBuf::from(x).join("mikanani-cli"),
+        _ => PathBuf::from(home.unwrap_or(".")).join(".config").join("mikanani-cli"),
     }
 }
 
@@ -154,7 +175,7 @@ mod tests {
     #[test]
     fn save_creates_missing_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let nested = dir.path().join("deep").join("mikan");
+        let nested = dir.path().join("deep").join("mikanani-cli");
         Config::default().save(&nested).unwrap();
         assert!(nested.join("config.toml").exists());
     }
@@ -180,10 +201,38 @@ mod tests {
     }
 
     #[test]
-    fn config_dir_prefers_nonempty_xdg() {
-        assert_eq!(config_dir_from(Some("/xdg"), "/home/u"), PathBuf::from("/xdg/mikan"));
-        assert_eq!(config_dir_from(None, "/home/u"), PathBuf::from("/home/u/.config/mikan"));
-        assert_eq!(config_dir_from(Some(""), "/home/u"), PathBuf::from("/home/u/.config/mikan"));
+    fn config_dir_unix_prefers_nonempty_xdg() {
+        // Linux/macOS: XDG wins when set, else ~/.config; APPDATA is ignored.
+        let cfg = PathBuf::from(".").join(".config").join("mikanani-cli");
+        assert_eq!(resolve_config_dir(false, None, Some("/xdg"), Some("/home/u")), PathBuf::from("/xdg/mikanani-cli"));
+        assert_eq!(
+            resolve_config_dir(false, None, None, Some("/home/u")),
+            PathBuf::from("/home/u/.config/mikanani-cli")
+        );
+        assert_eq!(
+            resolve_config_dir(false, None, Some(""), Some("/home/u")),
+            PathBuf::from("/home/u/.config/mikanani-cli")
+        );
+        assert_eq!(
+            resolve_config_dir(false, Some(r"C:\AppData"), None, Some("/home/u")),
+            PathBuf::from("/home/u/.config/mikanani-cli")
+        );
+        // No HOME either → current directory.
+        assert_eq!(resolve_config_dir(false, None, None, None), cfg);
+    }
+
+    #[test]
+    fn config_dir_windows_uses_appdata() {
+        // Windows: %APPDATA%\mikanani-cli, ignoring XDG/HOME entirely.
+        let appdata = r"C:\Users\u\AppData\Roaming";
+        assert_eq!(resolve_config_dir(true, Some(appdata), None, None), PathBuf::from(appdata).join("mikanani-cli"));
+        assert_eq!(
+            resolve_config_dir(true, Some(appdata), Some("/xdg"), Some("/home/u")),
+            PathBuf::from(appdata).join("mikanani-cli")
+        );
+        // Fallback to the current dir when APPDATA is missing or empty.
+        assert_eq!(resolve_config_dir(true, None, None, None), PathBuf::from(".").join("mikanani-cli"));
+        assert_eq!(resolve_config_dir(true, Some(""), None, None), PathBuf::from(".").join("mikanani-cli"));
     }
 
     #[test]
