@@ -1,5 +1,5 @@
 {
-  description = "mikanime-cli";
+  description = "mikanani-cli";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
