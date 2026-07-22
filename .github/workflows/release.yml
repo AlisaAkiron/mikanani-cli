@@ -1,13 +1,15 @@
 name: Release
 
-# Build release binaries when a version tag is pushed, and attach the
-# archives to the GitHub Release for that tag.
+# Build release binaries when a version tag is pushed, then publish a
+# single GitHub Release for that tag with all archives attached.
 on:
   push:
     tags: ['v*']
 
+# Least privilege: the build matrix only needs read; the publish job
+# elevates to contents:write to create the release.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,7 +34,7 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -79,8 +81,29 @@ jobs:
           Compress-Archive -Path $staging -DestinationPath "$staging.zip"
           "ASSET=$staging.zip" >> $env:GITHUB_ENV
 
-      - name: Upload archive to the release
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
         with:
-          files: ${{ env.ASSET }}
+          name: ${{ matrix.target }}
+          path: ${{ env.ASSET }}
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+
+      # Runs exactly once, so the release notes (Full Changelog) are
+      # generated a single time rather than once per build job.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/**/*
           generate_release_notes: true
