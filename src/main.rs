@@ -33,7 +33,7 @@ struct Args {
     url: Option<String>,
 
     /// Proxy URL (e.g. http://127.0.0.1:7890). Defaults to proxy env vars
-    /// and the macOS system proxy.
+    /// (all platforms) and the macOS/Windows system proxy.
     #[arg(long)]
     proxy: Option<String>,
 
