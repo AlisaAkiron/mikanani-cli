@@ -164,3 +164,7 @@ are never lost.
 - `2` — usage error (missing/invalid arguments).
 
 Failures within a batch are reported per-episode and never abort the whole run.
+
+## License
+
+Released under the [MIT License](LICENSE).

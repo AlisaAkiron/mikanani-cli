@@ -62,6 +62,12 @@
           };
 
           inherit nativeBuildInputs;
+
+          meta = with pkgs.lib; {
+            description = "Interactive downloader for Mikan Project RSS feeds";
+            license = licenses.mit;
+            mainProgram = "mikan";
+          };
         };
 
         apps.default = {
