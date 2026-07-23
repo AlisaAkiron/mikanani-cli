@@ -1,6 +1,6 @@
 [package]
 name = "mikanani-cli"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "An interactive CLI to download anime torrents from Mikan Project (蜜柑计划) RSS feeds."
