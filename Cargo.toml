@@ -3,6 +3,12 @@ name = "mikanani-cli"
 version = "0.2.0"
 edition = "2024"
 license = "MIT"
+description = "An interactive CLI to download anime torrents from Mikan Project (蜜柑计划) RSS feeds."
+repository = "https://github.com/AlisaAkiron/mikanani-cli"
+homepage = "https://github.com/AlisaAkiron/mikanani-cli"
+readme = "README.md"
+keywords = ["mikan", "anime", "rss", "torrent", "qbittorrent"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "mikan"
