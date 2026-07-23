@@ -64,7 +64,7 @@ jobs:
           strip "$bin" || true
           staging="mikan-${GITHUB_REF_NAME}-${TARGET}"
           mkdir "$staging"
-          cp "$bin" README.md README.en.md LICENSE "$staging/"
+          cp "$bin" README.md LICENSE "$staging/"
           tar czf "$staging.tar.gz" "$staging"
           echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
 
@@ -77,7 +77,7 @@ jobs:
           $bin = "target/$env:TARGET/release/mikan.exe"
           $staging = "mikan-$env:GITHUB_REF_NAME-$env:TARGET"
           New-Item -ItemType Directory -Path $staging | Out-Null
-          Copy-Item $bin, README.md, README.en.md, LICENSE $staging
+          Copy-Item $bin, README.md, LICENSE $staging
           Compress-Archive -Path $staging -DestinationPath "$staging.zip"
           "ASSET=$staging.zip" >> $env:GITHUB_ENV
 
