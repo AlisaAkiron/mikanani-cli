@@ -2,6 +2,7 @@ mod config;
 mod download;
 mod export;
 mod feed;
+mod mikan;
 mod qbt;
 mod sanitize;
 mod select;
@@ -83,6 +84,16 @@ enum Command {
     Qbt {
         #[command(subcommand)]
         action: QbtAction,
+    },
+    /// Search Mikan Project for a show and pick episodes interactively
+    Search {
+        /// Search term (prompted if omitted)
+        query: Option<String>,
+
+        /// Proxy URL (e.g. http://127.0.0.1:7890). Defaults to proxy env vars
+        /// and the macOS/Windows system proxy.
+        #[arg(long)]
+        proxy: Option<String>,
     },
 }
 
@@ -211,6 +222,73 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
+/// Build a Mikan RSS feed URL. `subgroup_id == 0` means "all groups" and omits
+/// the `subgroupid` parameter.
+fn rss_url(bangumi_id: u32, subgroup_id: u32) -> String {
+    let base = format!("https://mikanani.me/RSS/Bangumi?bangumiId={bangumi_id}");
+    if subgroup_id == 0 {
+        base
+    } else {
+        format!("{base}&subgroupid={subgroup_id}")
+    }
+}
+
+/// The subgroup step's decision: either use an id directly (no prompt) or show
+/// a menu. `Auto(0)` means "all groups" (RSS without `subgroupid`).
+enum SubgroupChoice {
+    Auto(u32),
+    Menu(Vec<mikan::Subgroup>),
+}
+
+/// Decide the subgroup step from the scraped groups: none → all-groups; one →
+/// use it; many → a menu with an "all groups" entry prepended.
+fn subgroup_choice(groups: Vec<mikan::Subgroup>) -> SubgroupChoice {
+    match groups.len() {
+        0 => SubgroupChoice::Auto(0),
+        1 => SubgroupChoice::Auto(groups[0].id),
+        _ => {
+            let mut opts = vec![mikan::Subgroup { name: "全部字幕组 (all groups)".to_string(), id: 0 }];
+            opts.extend(groups);
+            SubgroupChoice::Menu(opts)
+        }
+    }
+}
+
+/// A choice in the show picker: a scraped show, or "search again" — re-enter
+/// the query. `SearchAgain` sits at the bottom of the list so a wrong first
+/// hit doesn't force aborting the whole run (Mikan returns at most ~4 hits).
+#[derive(Clone)]
+enum ShowChoice {
+    Pick(mikan::Show),
+    SearchAgain,
+}
+
+impl fmt::Display for ShowChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ShowChoice::Pick(show) => f.write_str(&show.title),
+            ShowChoice::SearchAgain => f.write_str("↻ 重新搜索 (search again)"),
+        }
+    }
+}
+
+/// A choice in the subtitle-group picker: a group (including the synthetic
+/// "all groups" entry), or "back" — return to the show list without
+/// re-searching.
+enum GroupNav {
+    Group(mikan::Subgroup),
+    Back,
+}
+
+impl fmt::Display for GroupNav {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GroupNav::Group(group) => f.write_str(&group.name),
+            GroupNav::Back => f.write_str("← 返回上一步 (back to shows)"),
+        }
+    }
+}
+
 fn build_client(proxy: Option<&str>) -> Result<reqwest::blocking::Client> {
     let mut builder = reqwest::blocking::Client::builder().timeout(Duration::from_secs(30));
     if let Some(proxy) = proxy {
@@ -335,14 +413,23 @@ fn main() {
 
 fn run() -> Result<i32> {
     let mut args = Args::parse();
-    if let Some(Command::Qbt { action }) = args.command.take() {
-        return qbt_command(action);
+    match args.command.take() {
+        Some(Command::Qbt { action }) => return qbt_command(action),
+        Some(Command::Search { query, proxy }) => return search_flow(query, proxy.as_deref()),
+        None => {}
     }
     let Some(url) = args.url.clone() else {
-        // A subcommand can't participate in required_unless_present
-        // (clap 4.6 debug-asserts on it), so bare `mikan` is turned
-        // into a proper clap usage error here: stderr + exit 2.
-        usage_error("the following required arguments were not provided:\n  <URL>".to_string());
+        // Bare `mikan` launches search — unless headless flags/-y were given,
+        // which still require an explicit URL (preserve the old usage errors).
+        if args.yes {
+            usage_error(
+                "the following required arguments were not provided:\n  <URL>".to_string(),
+            );
+        }
+        if let Some(flag) = headless_flag_present(&args) {
+            usage_error(format!("{flag} requires --yes for non-interactive mode"));
+        }
+        return search_flow(None, args.proxy.as_deref());
     };
     if args.yes {
         if let Err(msg) = headless_precondition(&args) {
@@ -586,13 +673,153 @@ fn process_episodes(
 fn wizard(url: &str, proxy: Option<&str>) -> Result<i32> {
     let client = build_client(proxy)?;
 
-    let feed::Feed { channel_title, episodes } = {
+    let feed = {
         let _spinner = Spinner::start("fetching feed…");
         feed::fetch_feed(&client, url).map_err(add_proxy_hint)?
     };
-    if episodes.is_empty() {
-        bail!("feed \"{channel_title}\" contains no episodes");
+    if feed.episodes.is_empty() {
+        bail!("feed \"{}\" contains no episodes", feed.channel_title);
     }
+    run_export_flow(&client, feed)
+}
+
+/// Interactive search entry point: resolve a query, pick a show, pick a
+/// subtitle group, then hand the resulting feed to the shared export flow.
+/// Prompt for a Mikan search term. `initial` pre-fills the input, so a
+/// re-search can edit the previous term instead of retyping. Ok(None) means
+/// the user cancelled; the returned string is trimmed and non-empty.
+fn prompt_query(initial: Option<&str>) -> Result<Option<String>> {
+    let mut input = Text::new("Search Mikan:")
+        .with_validator(|s: &str| {
+            if s.trim().is_empty() {
+                Ok(Validation::Invalid("enter a search term".into()))
+            } else {
+                Ok(Validation::Valid)
+            }
+        })
+        .with_help_message("enter: search · esc: cancel");
+    if let Some(init) = initial {
+        input = input.with_initial_value(init);
+    }
+    Ok(take_or_cancel(input.prompt_skippable(), "the search term")?.map(|q| q.trim().to_string()))
+}
+
+fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
+    let client = build_client(proxy)?;
+
+    // Resolve the initial query (prompt when absent or blank).
+    let mut query = match query {
+        Some(q) if !q.trim().is_empty() => q.trim().to_string(),
+        _ => match prompt_query(None)? {
+            Some(q) => q,
+            None => {
+                println!("cancelled");
+                return Ok(0);
+            }
+        },
+    };
+
+    // Mikan returns at most ~4 hits, so the wanted show is often missing from
+    // the first search. This loop lets the user edit the term and search again
+    // from the show list, or back out of a show from the subgroup list —
+    // without aborting and re-running the CLI. Esc still cancels everywhere.
+    'search: loop {
+        let shows = {
+            let _spinner = Spinner::start("searching…");
+            mikan::search_shows(&client, &query).map_err(add_proxy_hint)?
+        };
+        // No results is not a dead end: re-prompt (pre-filled) to refine.
+        if shows.is_empty() {
+            println!("no shows found for \"{query}\"");
+            match prompt_query(Some(&query))? {
+                Some(q) => {
+                    query = q;
+                    continue 'search;
+                }
+                None => {
+                    println!("cancelled");
+                    return Ok(0);
+                }
+            }
+        }
+
+        // The scraped shows, plus a trailing "search again" entry.
+        let mut show_options: Vec<ShowChoice> =
+            shows.iter().cloned().map(ShowChoice::Pick).collect();
+        show_options.push(ShowChoice::SearchAgain);
+
+        // Pick a show. "Back" from the subgroup step returns here without
+        // re-searching.
+        'show: loop {
+            let Some(chosen) = take_or_cancel(
+                inquire::Select::new("Show:", show_options.clone())
+                    .with_help_message("type to filter · enter: select · esc: cancel")
+                    .prompt_skippable(),
+                "the show",
+            )?
+            else {
+                println!("cancelled");
+                return Ok(0);
+            };
+            let show = match chosen {
+                ShowChoice::SearchAgain => match prompt_query(Some(&query))? {
+                    Some(q) => {
+                        query = q;
+                        continue 'search;
+                    }
+                    None => {
+                        println!("cancelled");
+                        return Ok(0);
+                    }
+                },
+                ShowChoice::Pick(show) => show,
+            };
+
+            // Fetch subtitle groups and decide the subgroup.
+            let groups = {
+                let _spinner = Spinner::start("loading subtitle groups…");
+                mikan::subgroups(&client, show.id).map_err(add_proxy_hint)?
+            };
+            let subgroup_id = match subgroup_choice(groups) {
+                SubgroupChoice::Auto(id) => id,
+                SubgroupChoice::Menu(options) => {
+                    let mut nav: Vec<GroupNav> = options.into_iter().map(GroupNav::Group).collect();
+                    nav.push(GroupNav::Back);
+                    let Some(chosen) = take_or_cancel(
+                        inquire::Select::new("Subtitle group:", nav)
+                            .with_help_message("type to filter · enter: select · esc: cancel")
+                            .prompt_skippable(),
+                        "the subtitle group",
+                    )?
+                    else {
+                        println!("cancelled");
+                        return Ok(0);
+                    };
+                    match chosen {
+                        GroupNav::Group(group) => group.id,
+                        GroupNav::Back => continue 'show,
+                    }
+                }
+            };
+
+            // Build the RSS URL and reuse the shared export flow.
+            let url = rss_url(show.id, subgroup_id);
+            let feed = {
+                let _spinner = Spinner::start("fetching feed…");
+                feed::fetch_feed(&client, &url).map_err(add_proxy_hint)?
+            };
+            if feed.episodes.is_empty() {
+                bail!("feed \"{}\" contains no episodes", feed.channel_title);
+            }
+            return run_export_flow(&client, feed);
+        }
+    }
+}
+
+/// Runs the interactive picker → format → path → qBittorrent → execute steps
+/// over an already-fetched feed. Shared by the URL wizard and the search flow.
+fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Result<i32> {
+    let feed::Feed { channel_title, episodes } = feed;
 
     // Step 1: pick episodes.
     let rows: Vec<Row> = select::sort_episodes(episodes).into_iter().map(Row).collect();
@@ -735,7 +962,7 @@ fn wizard(url: &str, proxy: Option<&str>) -> Result<i32> {
     // Downloading .torrent files to disk is gated on `want_torrents`; adding
     // to qBittorrent is gated on `qbt_setup`. Hand the loop those two facts.
     let torrents_dir = if want_torrents { export_dir.as_deref() } else { None };
-    let totals = process_episodes(&client, &selected, torrents_dir, qbt_setup.as_ref());
+    let totals = process_episodes(client, &selected, torrents_dir, qbt_setup.as_ref());
     if want_torrents {
         println!(
             "{} downloaded, {} skipped, {} failed",
@@ -1154,8 +1381,9 @@ mod tests {
         assert!(Args::try_parse_from(["mikan", "qbt", "test"]).is_ok());
         assert!(Args::try_parse_from(["mikan", "qbt", "remove"]).is_err());
 
-        // Bare `mikan` parses (both None); run() turns it into a clap
-        // usage error — covered by the smoke check.
+        // Bare `mikan` parses (both None); run() now routes this into the
+        // interactive search flow rather than a usage error. `-y`/a headless
+        // flag without a URL still produces the clap usage error.
         let bare = Args::try_parse_from(["mikan"]).unwrap();
         assert!(bare.command.is_none() && bare.url.is_none());
     }
@@ -1165,6 +1393,20 @@ mod tests {
         assert_eq!(default_category("Mikan Project - 石纪元"), "Mikan Project - 石纪元");
         assert_eq!(default_category("A / B"), "A ⁄ B");
         assert_eq!(default_category("..."), "mikan");
+    }
+
+    #[test]
+    fn show_choice_display() {
+        let pick = ShowChoice::Pick(mikan::Show { title: "石纪元".to_string(), id: 3689 });
+        assert_eq!(pick.to_string(), "石纪元");
+        assert_eq!(ShowChoice::SearchAgain.to_string(), "↻ 重新搜索 (search again)");
+    }
+
+    #[test]
+    fn group_nav_display() {
+        let group = GroupNav::Group(mikan::Subgroup { name: "猎户发布组".to_string(), id: 597 });
+        assert_eq!(group.to_string(), "猎户发布组");
+        assert_eq!(GroupNav::Back.to_string(), "← 返回上一步 (back to shows)");
     }
 
     #[test]
@@ -1209,5 +1451,59 @@ mod tests {
 
         let a = Args::try_parse_from(["mikan", "http://x/rss"]).unwrap();
         assert_eq!(headless_flag_present(&a), None);
+    }
+
+    #[test]
+    fn rss_url_omits_subgroup_when_zero() {
+        assert_eq!(rss_url(3950, 0), "https://mikanani.me/RSS/Bangumi?bangumiId=3950");
+        assert_eq!(
+            rss_url(3950, 597),
+            "https://mikanani.me/RSS/Bangumi?bangumiId=3950&subgroupid=597"
+        );
+    }
+
+    #[test]
+    fn subgroup_choice_auto_and_menu() {
+        // No scraped groups → all-groups, no prompt.
+        assert!(matches!(subgroup_choice(vec![]), SubgroupChoice::Auto(0)));
+
+        // Exactly one → use it, no prompt.
+        let one = vec![mikan::Subgroup { name: "A".into(), id: 597 }];
+        assert!(matches!(subgroup_choice(one), SubgroupChoice::Auto(597)));
+
+        // Two or more → menu with "all groups" (id 0) prepended.
+        let two = vec![
+            mikan::Subgroup { name: "A".into(), id: 597 },
+            mikan::Subgroup { name: "B".into(), id: 611 },
+        ];
+        match subgroup_choice(two) {
+            SubgroupChoice::Menu(opts) => {
+                assert_eq!(opts.len(), 3);
+                assert_eq!(opts[0].id, 0);
+                assert!(opts[0].name.contains("all groups"));
+                assert_eq!(opts[1].id, 597);
+                assert_eq!(opts[2].id, 611);
+            }
+            SubgroupChoice::Auto(_) => panic!("expected a menu for two groups"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_search_subcommand() {
+        let a = Args::try_parse_from(["mikan", "search", "dr.stone"]).unwrap();
+        assert!(matches!(
+            a.command,
+            Some(Command::Search { query: Some(ref q), proxy: None }) if q == "dr.stone"
+        ));
+
+        let a = Args::try_parse_from(["mikan", "search"]).unwrap();
+        assert!(matches!(a.command, Some(Command::Search { query: None, proxy: None })));
+
+        let a = Args::try_parse_from(["mikan", "search", "x", "--proxy", "http://127.0.0.1:7890"])
+            .unwrap();
+        assert!(matches!(
+            a.command,
+            Some(Command::Search { proxy: Some(ref p), .. }) if p == "http://127.0.0.1:7890"
+        ));
     }
 }

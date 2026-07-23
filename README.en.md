@@ -56,6 +56,29 @@ nix develop             # drop into a dev shell with the toolchain
 
 ## Usage
 
+### Search mode
+
+When you don't want to hand-build an RSS URL, search instead:
+
+```sh
+mikan                    # opens search directly (prompts for a keyword)
+mikan search dr.stone    # search with a keyword
+```
+
+The flow: enter a keyword → pick a show from the matches → pick a subtitle
+group (auto-skipped when there's only one; a top-of-list "all groups" entry
+when there are several) → the existing episode multi-select and export steps.
+Search is interactive; the non-interactive (`-y`) mode still requires an
+explicit RSS URL.
+
+Mikan returns at most ~4 results, so the show you want may not be in the first
+hit. You don't have to abort and rerun: pick **"search again"** at the bottom of
+the show list to re-enter the term (pre-filled so you can edit it), or **"back
+to shows"** in the subtitle-group list to return to the show list.
+
+> Because `mikanani.me` is frequently DNS-poisoned, search also benefits from
+> `--proxy` or a system/environment proxy.
+
 ### Interactive wizard
 
 Pass a Mikan RSS feed URL and follow the prompts:
