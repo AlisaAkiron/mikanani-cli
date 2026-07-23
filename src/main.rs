@@ -886,7 +886,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
 
     // Step 3: export path — only when something is written to disk.
     let config_dir = config::config_dir();
-    let mut cfg = config::Config::load(&config_dir);
+    let mut cfg = config::Config::load(&config_dir)?;
     let export_dir: Option<PathBuf> = if want_torrents || want_urls {
         // Prefill the last-used path; on a bad path, prefill what was just
         // typed so a typo can be fixed in place. Create the directory here so
@@ -1027,7 +1027,7 @@ fn headless(url: &str, args: &Args) -> Result<i32> {
     // prompts (this may run headless in cron).
     let qbt_setup = match &args.qbt {
         Some(profile_name) => {
-            let cfg = config::Config::load(&config::config_dir());
+            let cfg = config::Config::load(&config::config_dir())?;
             let profile = match cfg.qbt.get(profile_name) {
                 Some(profile) => profile.clone(),
                 None if cfg.qbt.is_empty() => {
@@ -1175,7 +1175,7 @@ struct QbtSetup {
 
 fn qbt_command(action: QbtAction) -> Result<i32> {
     let dir = config::config_dir();
-    let mut cfg = config::Config::load(&dir);
+    let mut cfg = config::Config::load(&dir)?;
     match action {
         QbtAction::Set { name } => {
             let name = profile_name_or_default(name)?;
