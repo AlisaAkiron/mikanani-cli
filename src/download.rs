@@ -38,9 +38,9 @@ pub(crate) fn fetch_bytes(client: &reqwest::blocking::Client, url: &str) -> anyh
     let response = client
         .get(url)
         .send()
-        .context("request failed")?
+        .context("请求失败")?
         .error_for_status()?;
-    Ok(response.bytes().context("reading torrent body")?.to_vec())
+    Ok(response.bytes().context("读取种子内容")?.to_vec())
 }
 
 #[cfg(test)]

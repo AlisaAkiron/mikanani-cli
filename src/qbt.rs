@@ -31,7 +31,7 @@ impl QbtClient {
             .no_proxy()
             .timeout(Duration::from_secs(15))
             .build()
-            .context("building the qBittorrent HTTP client")?;
+            .context("创建 qBittorrent HTTP 客户端")?;
         let mut client = QbtClient {
             endpoint: profile.endpoint.trim_end_matches('/').to_string(),
             http,
@@ -51,7 +51,7 @@ impl QbtClient {
 
     fn unreachable_hint(&self) -> String {
         format!(
-            "could not reach qBittorrent at {} — is the WebUI enabled?",
+            "无法连接到 qBittorrent（{}）—— WebUI 是否已启用？",
             self.endpoint
         )
     }
@@ -83,7 +83,7 @@ impl QbtClient {
         // Older qBt answers 200 + "Fails.", newer answers 401 — treat both
         // as bad credentials.
         if !status.is_success() || body.trim() == "Fails." {
-            bail!("qBittorrent login failed — check username/password");
+            bail!("qBittorrent 登录失败 —— 请检查用户名/密码");
         }
         // A successful login with no SID cookie means the server isn't issuing
         // a session — it's exempting this client from auth ("bypass
@@ -108,8 +108,8 @@ impl QbtClient {
             .send()
             .with_context(|| self.unreachable_hint())?
             .error_for_status()
-            .context("qBittorrent rejected the version request")?;
-        Ok(response.text().context("reading the version response")?.trim().to_string())
+            .context("qBittorrent 拒绝了版本请求")?;
+        Ok(response.text().context("读取版本响应")?.trim().to_string())
     }
 
     /// Creates the category if missing. 409 means it already exists (or
@@ -124,7 +124,7 @@ impl QbtClient {
         if status.is_success() || status == reqwest::StatusCode::CONFLICT {
             Ok(())
         } else {
-            bail!("creating qBittorrent category \"{name}\" failed: HTTP {status}");
+            bail!("创建 qBittorrent 分类「{name}」失败：HTTP {status}");
         }
     }
 
@@ -134,7 +134,7 @@ impl QbtClient {
         let part = reqwest::blocking::multipart::Part::bytes(bytes)
             .file_name(filename.to_string())
             .mime_str("application/x-bittorrent")
-            .context("building the torrent upload")?;
+            .context("构建种子上传")?;
         let form = reqwest::blocking::multipart::Form::new()
             .part("torrents", part)
             .text("category", category.to_string())
@@ -148,7 +148,7 @@ impl QbtClient {
         let body = response.text().unwrap_or_default();
         if !status.is_success() || body.trim() == "Fails." {
             let detail = if body.trim().is_empty() { format!("HTTP {status}") } else { body.trim().to_string() };
-            bail!("qBittorrent rejected the torrent: {detail}");
+            bail!("qBittorrent 拒绝了该种子：{detail}");
         }
         Ok(())
     }
@@ -270,14 +270,14 @@ mod tests {
     fn login_fails_body_is_friendly_error() {
         let mock = serve_script(vec![("200 OK", "", "Fails.")]);
         let err = QbtClient::connect(&profile(&mock.endpoint, "admin", "bad")).unwrap_err();
-        assert!(format!("{err:#}").contains("login failed"), "was: {err:#}");
+        assert!(format!("{err:#}").contains("登录失败"), "was: {err:#}");
     }
 
     #[test]
     fn login_401_is_friendly_error() {
         let mock = serve_script(vec![("401 Unauthorized", "", "")]);
         let err = QbtClient::connect(&profile(&mock.endpoint, "admin", "bad")).unwrap_err();
-        assert!(format!("{err:#}").contains("login failed"), "was: {err:#}");
+        assert!(format!("{err:#}").contains("登录失败"), "was: {err:#}");
     }
 
     #[test]

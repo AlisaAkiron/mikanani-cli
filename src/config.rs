@@ -53,12 +53,12 @@ impl Config {
                 let backup = dir.join("config.toml.bak");
                 let rescued = std::fs::rename(&path, &backup).is_ok();
                 let whereto = if rescued {
-                    format!(" — your previous file was moved to {}", backup.display())
+                    format!(" —— 原文件已移动到 {}", backup.display())
                 } else {
                     String::new()
                 };
                 eprintln!(
-                    "warning: {} is unreadable and was ignored ({e}){whereto}",
+                    "警告：{} 无法解析，已被忽略（{e}）{whereto}",
                     path.display()
                 );
                 Config::default()

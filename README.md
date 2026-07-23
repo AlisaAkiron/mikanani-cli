@@ -1,7 +1,5 @@
 # mikan
 
-**简体中文** | [English](README.en.md)
-
 一个用于下载 [Mikan Project（蜜柑计划）](https://mikanani.me) 番剧 RSS 订阅的交互式命令行工具。
 
 给它一个订阅链接，它便会引导你挑选剧集，并把它们送到你想要的地方——保存为
@@ -15,7 +13,7 @@ $ mikan "https://mikanani.me/RSS/Bangumi?bangumiId=3950&subgroupid=597"
 > [x] [猎户压制部] 新石纪 第四季 [37] [1080p] [繁日内嵌]  (835.0 MiB, 2026-06-28)
   [ ] [猎户压制部] 新石纪 第四季 [36] [1080p] [繁日内嵌]  (842.1 MiB, 2026-06-21)
   ...
-  type to filter · space: toggle · →/←: all/none · enter: next · esc: cancel
+  输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：取消
 ```
 
 ## 功能特性

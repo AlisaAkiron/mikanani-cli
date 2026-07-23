@@ -26,7 +26,7 @@ pub fn write_url_list(
         body.push_str(&ep.torrent_url);
         body.push('\n');
     }
-    std::fs::write(&target, body).with_context(|| format!("writing {}", target.display()))?;
+    std::fs::write(&target, body).with_context(|| format!("写入 {}", target.display()))?;
     Ok(target)
 }
 

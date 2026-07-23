@@ -23,75 +23,73 @@ use std::time::Duration;
 use download::Outcome;
 use feed::Episode;
 
-/// Interactive downloader for Mikan Project RSS feeds.
+/// 一个用于下载 Mikan Project（蜜柑计划）番剧 RSS 订阅的交互式命令行工具。
 #[derive(Parser)]
 #[command(name = "mikan", version, about, args_conflicts_with_subcommands = true)]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// Mikan RSS feed URL, e.g. "https://mikanani.me/RSS/Bangumi?bangumiId=3950&subgroupid=597"
+    /// Mikan RSS 订阅链接，例如："https://mikanani.me/RSS/Bangumi?bangumiId=3950&subgroupid=597"
     url: Option<String>,
 
-    /// Proxy URL (e.g. http://127.0.0.1:7890). Defaults to proxy env vars
-    /// (all platforms) and the macOS/Windows system proxy.
+    /// 代理地址（例如 http://127.0.0.1:7890）。默认使用代理环境变量（所有平台）以及 macOS/Windows 系统代理。
     #[arg(long)]
     proxy: Option<String>,
 
-    /// Run non-interactively: no prompts. Needs a selection and an output flag
-    #[arg(short = 'y', long, help_heading = "Non-interactive mode")]
+    /// 非交互模式运行：不显示任何提示，需要同时指定一个选择参数和一个输出参数
+    #[arg(short = 'y', long, help_heading = "非交互模式")]
     yes: bool,
 
-    /// Select every episode in the feed
-    #[arg(long, help_heading = "Non-interactive mode")]
+    /// 选择订阅中的所有剧集
+    #[arg(long, help_heading = "非交互模式")]
     all: bool,
 
-    /// Keep only the newest N episodes
-    #[arg(long, value_name = "N", help_heading = "Non-interactive mode")]
+    /// 只保留最新的 N 集
+    #[arg(long, value_name = "N", help_heading = "非交互模式")]
     latest: Option<usize>,
 
-    /// Keep episodes whose title contains TEXT (case-insensitive)
-    #[arg(long, value_name = "TEXT", help_heading = "Non-interactive mode")]
+    /// 只保留标题包含 TEXT 的剧集（不区分大小写）
+    #[arg(long, value_name = "TEXT", help_heading = "非交互模式")]
     filter: Option<String>,
 
-    /// Download .torrent files into DIR
-    #[arg(long, value_name = "DIR", help_heading = "Non-interactive mode")]
+    /// 将 .torrent 文件下载到 DIR
+    #[arg(long, value_name = "DIR", help_heading = "非交互模式")]
     out: Option<PathBuf>,
 
-    /// Write the torrent-URL list into DIR
-    #[arg(long = "url-list", value_name = "DIR", help_heading = "Non-interactive mode")]
+    /// 将种子 URL 列表写入 DIR
+    #[arg(long = "url-list", value_name = "DIR", help_heading = "非交互模式")]
     url_list: Option<PathBuf>,
 
-    /// Add to qBittorrent using a saved profile (bare = "default"; --qbt=NAME)
+    /// 使用已保存的配置添加到 qBittorrent（不带值时使用「default」；--qbt=NAME 指定配置名）
     #[arg(
         long,
         value_name = "PROFILE",
         num_args = 0..=1,
         require_equals = true,
         default_missing_value = "default",
-        help_heading = "Non-interactive mode"
+        help_heading = "非交互模式"
     )]
     qbt: Option<String>,
 
-    /// qBittorrent category (default: sanitized feed title)
-    #[arg(long, value_name = "NAME", help_heading = "Non-interactive mode")]
+    /// qBittorrent 分类（默认为清洗后的订阅标题）
+    #[arg(long, value_name = "NAME", help_heading = "非交互模式")]
     category: Option<String>,
 }
 
 #[derive(clap::Subcommand)]
 enum Command {
-    /// Manage qBittorrent connection profiles
+    /// 管理 qBittorrent 连接配置
     Qbt {
         #[command(subcommand)]
         action: QbtAction,
     },
-    /// Search Mikan Project for a show and pick episodes interactively
+    /// 搜索蜜柑计划中的番剧并交互式选择剧集
     Search {
-        /// Search term (prompted if omitted)
+        /// 搜索关键词（留空则会提示输入）
         query: Option<String>,
 
-        /// Proxy URL (e.g. http://127.0.0.1:7890). Defaults to proxy env vars
-        /// and the macOS/Windows system proxy.
+        /// 代理地址（例如 http://127.0.0.1:7890）。默认使用代理环境变量以及 macOS/Windows 系统代理。
         #[arg(long)]
         proxy: Option<String>,
     },
@@ -99,21 +97,21 @@ enum Command {
 
 #[derive(clap::Subcommand)]
 enum QbtAction {
-    /// Create or update a profile interactively (default name: "default")
+    /// 交互式创建或更新配置（默认名称为「default」）
     Set {
-        /// Profile to create or update (default: "default")
+        /// 要创建或更新的配置（默认为「default」）
         name: Option<String>,
     },
-    /// List saved profiles
+    /// 列出已保存的配置
     List,
-    /// Remove a profile
+    /// 删除一个配置
     Remove {
-        /// Profile to remove
+        /// 要删除的配置
         name: String,
     },
-    /// Connect with a profile and print the qBittorrent version
+    /// 使用配置连接并打印 qBittorrent 版本
     Test {
-        /// Profile to test (default: "default")
+        /// 要测试的配置（默认为「default」）
         name: Option<String>,
     },
 }
@@ -139,7 +137,7 @@ impl fmt::Display for Row {
 /// answered question).
 fn episode_selection_summary(selected: &[ListOption<&Row>]) -> String {
     let count = selected.len();
-    let mut header = format!("\n{count} episode{}", if count == 1 { "" } else { "s" });
+    let mut header = format!("\n{count} 集");
     if selected.iter().any(|opt| opt.value.0.size.is_some()) {
         let total: u64 = selected.iter().filter_map(|opt| opt.value.0.size).sum();
         header.push_str(&format!(" · {}", fmt_size(total)));
@@ -247,7 +245,7 @@ fn subgroup_choice(groups: Vec<mikan::Subgroup>) -> SubgroupChoice {
         0 => SubgroupChoice::Auto(0),
         1 => SubgroupChoice::Auto(groups[0].id),
         _ => {
-            let mut opts = vec![mikan::Subgroup { name: "全部字幕组 (all groups)".to_string(), id: 0 }];
+            let mut opts = vec![mikan::Subgroup { name: "全部字幕组".to_string(), id: 0 }];
             opts.extend(groups);
             SubgroupChoice::Menu(opts)
         }
@@ -267,7 +265,7 @@ impl fmt::Display for ShowChoice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ShowChoice::Pick(show) => f.write_str(&show.title),
-            ShowChoice::SearchAgain => f.write_str("↻ 重新搜索 (search again)"),
+            ShowChoice::SearchAgain => f.write_str("↻ 重新搜索"),
         }
     }
 }
@@ -284,7 +282,7 @@ impl fmt::Display for GroupNav {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GroupNav::Group(group) => f.write_str(&group.name),
-            GroupNav::Back => f.write_str("← 返回上一步 (back to shows)"),
+            GroupNav::Back => f.write_str("← 返回上一步"),
         }
     }
 }
@@ -292,9 +290,9 @@ impl fmt::Display for GroupNav {
 fn build_client(proxy: Option<&str>) -> Result<reqwest::blocking::Client> {
     let mut builder = reqwest::blocking::Client::builder().timeout(Duration::from_secs(30));
     if let Some(proxy) = proxy {
-        builder = builder.proxy(reqwest::Proxy::all(proxy).context("invalid --proxy URL")?);
+        builder = builder.proxy(reqwest::Proxy::all(proxy).context("无效的 --proxy 地址")?);
     }
-    builder.build().context("building HTTP client")
+    builder.build().context("创建 HTTP 客户端")
 }
 
 fn add_proxy_hint(e: anyhow::Error) -> anyhow::Error {
@@ -307,8 +305,8 @@ fn add_proxy_hint(e: anyhow::Error) -> anyhow::Error {
     .any(|needle| text.contains(needle));
     if looks_blocked {
         e.context(
-            "could not reach the feed — mikanani.me is often DNS-poisoned; \
-             check your proxy (--proxy http://host:port, HTTPS_PROXY, or the system proxy)",
+            "无法访问订阅 —— mikanani.me 常被 DNS 污染；请检查代理\
+             （--proxy http://host:port、HTTPS_PROXY 或系统代理）",
         )
     } else {
         e
@@ -372,7 +370,7 @@ fn progress_err(tag: &str, status: &str, detail: impl fmt::Display) {
 
 /// Connect to qBittorrent, showing a spinner during the blocking attempt.
 fn connect_with_spinner(profile: &config::QbtProfile) -> Result<qbt::QbtClient> {
-    let _spinner = Spinner::start("connecting to qBittorrent…");
+    let _spinner = Spinner::start("正在连接 qBittorrent…");
     qbt::QbtClient::connect(profile)
 }
 
@@ -390,11 +388,11 @@ fn prompt_and_connect(
         };
         match connect_with_spinner(&profile) {
             Ok(client) => {
-                println!("connected — qBittorrent {}", client.version());
+                println!("已连接 —— qBittorrent {}", client.version());
                 return Ok(Some((client, profile)));
             }
             Err(e) => {
-                eprintln!("error: {e:#}");
+                eprintln!("错误：{e:#}");
                 prefill = Some(profile);
             }
         }
@@ -405,7 +403,7 @@ fn main() {
     match run() {
         Ok(code) => std::process::exit(code),
         Err(e) => {
-            eprintln!("error: {e:#}");
+            eprintln!("错误：{e:#}");
             std::process::exit(1);
         }
     }
@@ -423,11 +421,11 @@ fn run() -> Result<i32> {
         // which still require an explicit URL (preserve the old usage errors).
         if args.yes {
             usage_error(
-                "the following required arguments were not provided:\n  <URL>".to_string(),
+                "缺少必需的参数：\n  <URL>".to_string(),
             );
         }
         if let Some(flag) = headless_flag_present(&args) {
-            usage_error(format!("{flag} requires --yes for non-interactive mode"));
+            usage_error(format!("{flag} 需要配合 --yes 使用（非交互模式）"));
         }
         return search_flow(None, args.proxy.as_deref());
     };
@@ -440,7 +438,7 @@ fn run() -> Result<i32> {
     // Headless-only flags without -y: reject rather than silently open the
     // wizard when the user clearly meant a non-interactive run.
     if let Some(flag) = headless_flag_present(&args) {
-        usage_error(format!("{flag} requires --yes for non-interactive mode"));
+        usage_error(format!("{flag} 需要配合 --yes 使用（非交互模式）"));
     }
     wizard(&url, args.proxy.as_deref())
 }
@@ -479,10 +477,10 @@ fn headless_flag_present(args: &Args) -> Option<&'static str> {
 /// carries the usage message to print (and exit 2 on).
 fn headless_precondition(args: &Args) -> Result<(), String> {
     if !(args.all || args.latest.is_some() || args.filter.is_some()) {
-        return Err("specify --all, --latest, or --filter".to_string());
+        return Err("请指定 --all、--latest 或 --filter".to_string());
     }
     if args.out.is_none() && args.url_list.is_none() && args.qbt.is_none() {
-        return Err("specify at least one of --out, --url-list, --qbt".to_string());
+        return Err("请至少指定 --out、--url-list、--qbt 之一".to_string());
     }
     Ok(())
 }
@@ -491,31 +489,31 @@ fn headless_precondition(args: &Args) -> Result<(), String> {
 /// connect, and ask the category. Ok(None) = user cancelled.
 fn resolve_qbt(cfg: &config::Config, channel_title: &str) -> Result<Option<QbtSetup>> {
     let (client, save_as) = if cfg.qbt.is_empty() {
-        println!("no qBittorrent profile configured — set one up now");
+        println!("尚未配置 qBittorrent，现在来设置一个");
         let Some((client, profile)) = prompt_and_connect(None)? else {
             return Ok(None);
         };
         let Some(save) = take_or_cancel(
-            inquire::Confirm::new("Save this profile for next time?")
+            inquire::Confirm::new("保存该配置以便下次使用？")
                 .with_default(true)
                 .prompt_skippable(),
-            "whether to save the profile",
+            "是否保存配置",
         )? else {
             return Ok(None);
         };
         let save_as = if save {
             let Some(name) = take_or_cancel(
-                Text::new("Profile name:")
+                Text::new("配置名称：")
                     .with_initial_value("default")
                     .with_validator(|input: &str| {
                         if input.trim().is_empty() {
-                            Ok(Validation::Invalid("name must not be empty".into()))
+                            Ok(Validation::Invalid("名称不能为空".into()))
                         } else {
                             Ok(Validation::Valid)
                         }
                     })
                     .prompt_skippable(),
-                "the profile name",
+                "配置名称",
             )? else {
                 return Ok(None);
             };
@@ -531,13 +529,13 @@ fn resolve_qbt(cfg: &config::Config, channel_title: &str) -> Result<Option<QbtSe
         loop {
             let profile = if cfg.qbt.len() == 1 {
                 let (name, profile) = cfg.qbt.iter().next().expect("len checked");
-                println!("using qBittorrent profile \"{name}\"");
+                println!("使用 qBittorrent 配置「{name}」");
                 profile.clone()
             } else {
                 let names: Vec<String> = cfg.qbt.keys().cloned().collect();
                 let Some(name) = take_or_cancel(
-                    inquire::Select::new("qBittorrent profile:", names).prompt_skippable(),
-                    "the qBittorrent profile",
+                    inquire::Select::new("qBittorrent 配置：", names).prompt_skippable(),
+                    "qBittorrent 配置",
                 )? else {
                     return Ok(None);
                 };
@@ -545,16 +543,16 @@ fn resolve_qbt(cfg: &config::Config, channel_title: &str) -> Result<Option<QbtSe
             };
             match connect_with_spinner(&profile) {
                 Ok(client) => {
-                    println!("connected — qBittorrent {}", client.version());
+                    println!("已连接 —— qBittorrent {}", client.version());
                     break (client, None);
                 }
                 Err(e) => {
-                    eprintln!("error: {e:#}");
+                    eprintln!("错误：{e:#}");
                     let Some(true) = take_or_cancel(
-                        inquire::Confirm::new("couldn't connect — try again?")
+                        inquire::Confirm::new("连接失败 —— 重试？")
                             .with_default(true)
                             .prompt_skippable(),
-                        "whether to retry",
+                        "是否重试",
                     )? else {
                         return Ok(None);
                     };
@@ -564,17 +562,17 @@ fn resolve_qbt(cfg: &config::Config, channel_title: &str) -> Result<Option<QbtSe
     };
 
     let Some(category) = take_or_cancel(
-        Text::new("qBittorrent category (group/folder):")
+        Text::new("qBittorrent 分类（分组/文件夹）：")
             .with_initial_value(&default_category(channel_title))
             .with_validator(|input: &str| {
                 if input.trim().is_empty() {
-                    Ok(Validation::Invalid("category must not be empty".into()))
+                    Ok(Validation::Invalid("分类不能为空".into()))
                 } else {
                     Ok(Validation::Valid)
                 }
             })
             .prompt_skippable(),
-        "the category",
+        "分类",
     )? else {
         return Ok(None);
     };
@@ -589,7 +587,7 @@ fn read_back_for_qbt(tag: &str, path: &std::path::Path, qbt_failed: &mut u32) ->
         Ok(bytes) => Some(bytes),
         Err(e) => {
             *qbt_failed += 1;
-            progress_err(tag, "failed", format!("reading back {}: {e}", path.display()));
+            progress_err(tag, "失败", format!("回读 {}：{e}", path.display()));
             None
         }
     }
@@ -628,28 +626,28 @@ fn process_episodes(
             Some(dir) => match download::download(client, ep, dir) {
                 Outcome::Downloaded(path) => {
                     totals.downloaded += 1;
-                    progress(&tag, "downloaded", path.display());
+                    progress(&tag, "已下载", path.display());
                     if qbt_setup.is_some() {
                         bytes_for_qbt = read_back_for_qbt(&tag, &path, &mut totals.qbt_failed);
                     }
                 }
                 Outcome::Skipped(path) => {
                     totals.skipped += 1;
-                    progress(&tag, "skipped (exists)", path.display());
+                    progress(&tag, "已跳过（已存在）", path.display());
                     if qbt_setup.is_some() {
                         bytes_for_qbt = read_back_for_qbt(&tag, &path, &mut totals.qbt_failed);
                     }
                 }
                 Outcome::Failed(message) => {
                     totals.failed += 1;
-                    progress_err(&tag, "failed", message);
+                    progress_err(&tag, "失败", message);
                 }
             },
             None if qbt_setup.is_some() => match download::fetch_bytes(client, &ep.torrent_url) {
                 Ok(bytes) => bytes_for_qbt = Some(bytes),
                 Err(e) => {
                     totals.qbt_failed += 1;
-                    progress_err(&tag, "failed", format!("{filename}: {e:#}"));
+                    progress_err(&tag, "失败", format!("{filename}: {e:#}"));
                 }
             },
             None => {}
@@ -658,11 +656,11 @@ fn process_episodes(
             match setup.client.add_torrent(&filename, bytes, &setup.category) {
                 Ok(()) => {
                     totals.qbt_added += 1;
-                    progress(&tag, "added to qbt", &filename);
+                    progress(&tag, "已添加到 qBittorrent", &filename);
                 }
                 Err(e) => {
                     totals.qbt_failed += 1;
-                    progress_err(&tag, "failed", format!("{filename}: {e:#}"));
+                    progress_err(&tag, "失败", format!("{filename}: {e:#}"));
                 }
             }
         }
@@ -674,11 +672,11 @@ fn wizard(url: &str, proxy: Option<&str>) -> Result<i32> {
     let client = build_client(proxy)?;
 
     let feed = {
-        let _spinner = Spinner::start("fetching feed…");
+        let _spinner = Spinner::start("正在获取订阅…");
         feed::fetch_feed(&client, url).map_err(add_proxy_hint)?
     };
     if feed.episodes.is_empty() {
-        bail!("feed \"{}\" contains no episodes", feed.channel_title);
+        bail!("订阅「{}」中没有剧集", feed.channel_title);
     }
     run_export_flow(&client, feed)
 }
@@ -689,19 +687,19 @@ fn wizard(url: &str, proxy: Option<&str>) -> Result<i32> {
 /// re-search can edit the previous term instead of retyping. Ok(None) means
 /// the user cancelled; the returned string is trimmed and non-empty.
 fn prompt_query(initial: Option<&str>) -> Result<Option<String>> {
-    let mut input = Text::new("Search Mikan:")
+    let mut input = Text::new("搜索蜜柑：")
         .with_validator(|s: &str| {
             if s.trim().is_empty() {
-                Ok(Validation::Invalid("enter a search term".into()))
+                Ok(Validation::Invalid("请输入搜索关键词".into()))
             } else {
                 Ok(Validation::Valid)
             }
         })
-        .with_help_message("enter: search · esc: cancel");
+        .with_help_message("回车：搜索 · Esc：取消");
     if let Some(init) = initial {
         input = input.with_initial_value(init);
     }
-    Ok(take_or_cancel(input.prompt_skippable(), "the search term")?.map(|q| q.trim().to_string()))
+    Ok(take_or_cancel(input.prompt_skippable(), "搜索关键词")?.map(|q| q.trim().to_string()))
 }
 
 fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
@@ -713,7 +711,7 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
         _ => match prompt_query(None)? {
             Some(q) => q,
             None => {
-                println!("cancelled");
+                println!("已取消");
                 return Ok(0);
             }
         },
@@ -725,19 +723,19 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
     // without aborting and re-running the CLI. Esc still cancels everywhere.
     'search: loop {
         let shows = {
-            let _spinner = Spinner::start("searching…");
+            let _spinner = Spinner::start("正在搜索…");
             mikan::search_shows(&client, &query).map_err(add_proxy_hint)?
         };
         // No results is not a dead end: re-prompt (pre-filled) to refine.
         if shows.is_empty() {
-            println!("no shows found for \"{query}\"");
+            println!("未找到与「{query}」匹配的番剧");
             match prompt_query(Some(&query))? {
                 Some(q) => {
                     query = q;
                     continue 'search;
                 }
                 None => {
-                    println!("cancelled");
+                    println!("已取消");
                     return Ok(0);
                 }
             }
@@ -752,13 +750,13 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
         // re-searching.
         'show: loop {
             let Some(chosen) = take_or_cancel(
-                inquire::Select::new("Show:", show_options.clone())
-                    .with_help_message("type to filter · enter: select · esc: cancel")
+                inquire::Select::new("番剧：", show_options.clone())
+                    .with_help_message("输入以筛选 · 回车：选择 · Esc：取消")
                     .prompt_skippable(),
-                "the show",
+                "番剧",
             )?
             else {
-                println!("cancelled");
+                println!("已取消");
                 return Ok(0);
             };
             let show = match chosen {
@@ -768,7 +766,7 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
                         continue 'search;
                     }
                     None => {
-                        println!("cancelled");
+                        println!("已取消");
                         return Ok(0);
                     }
                 },
@@ -777,7 +775,7 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
 
             // Fetch subtitle groups and decide the subgroup.
             let groups = {
-                let _spinner = Spinner::start("loading subtitle groups…");
+                let _spinner = Spinner::start("正在加载字幕组…");
                 mikan::subgroups(&client, show.id).map_err(add_proxy_hint)?
             };
             let subgroup_id = match subgroup_choice(groups) {
@@ -786,13 +784,13 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
                     let mut nav: Vec<GroupNav> = options.into_iter().map(GroupNav::Group).collect();
                     nav.push(GroupNav::Back);
                     let Some(chosen) = take_or_cancel(
-                        inquire::Select::new("Subtitle group:", nav)
-                            .with_help_message("type to filter · enter: select · esc: cancel")
+                        inquire::Select::new("字幕组：", nav)
+                            .with_help_message("输入以筛选 · 回车：选择 · Esc：取消")
                             .prompt_skippable(),
-                        "the subtitle group",
+                        "字幕组",
                     )?
                     else {
-                        println!("cancelled");
+                        println!("已取消");
                         return Ok(0);
                     };
                     match chosen {
@@ -805,11 +803,11 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
             // Build the RSS URL and reuse the shared export flow.
             let url = rss_url(show.id, subgroup_id);
             let feed = {
-                let _spinner = Spinner::start("fetching feed…");
+                let _spinner = Spinner::start("正在获取订阅…");
                 feed::fetch_feed(&client, &url).map_err(add_proxy_hint)?
             };
             if feed.episodes.is_empty() {
-                bail!("feed \"{}\" contains no episodes", feed.channel_title);
+                bail!("订阅「{}」中没有剧集", feed.channel_title);
             }
             return run_export_flow(&client, feed);
         }
@@ -826,21 +824,21 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
     let picked = match MultiSelect::new(&channel_title, rows)
         .with_page_size(15)
         .with_formatter(&|selected| episode_selection_summary(selected))
-        .with_help_message("type to filter · space: toggle · →/←: all/none · enter: next · esc: cancel")
+        .with_help_message("输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：取消")
         .prompt_skippable()
     {
         Ok(Some(picked)) if !picked.is_empty() => picked,
         Ok(Some(_)) => {
             // Enter with nothing ticked — a deliberate "never mind".
-            println!("nothing selected");
+            println!("未选择任何内容");
             return Ok(0);
         }
         Ok(None) | Err(InquireError::OperationInterrupted) => {
             // Esc or Ctrl-C — the same "cancelled" as every later step.
-            println!("cancelled");
+            println!("已取消");
             return Ok(0);
         }
-        Err(e) => return Err(e).context("showing the episode picker"),
+        Err(e) => return Err(e).context("显示剧集选择器"),
     };
     let selected: Vec<Episode> = picked.into_iter().map(|row| row.0).collect();
 
@@ -848,23 +846,23 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
     let options = vec![
         FormatOption {
             format: ExportFormat::TorrentFiles,
-            label: "Download .torrent files".to_string(),
+            label: "下载 .torrent 文件".to_string(),
         },
         FormatOption {
             format: ExportFormat::UrlList,
-            label: format!("Write torrent URLs to \"{}\"", export::url_list_filename(&channel_title)),
+            label: format!("将种子 URL 列表写入「{}」", export::url_list_filename(&channel_title)),
         },
         FormatOption {
             format: ExportFormat::Qbt,
-            label: "Add to qBittorrent".to_string(),
+            label: "添加到 qBittorrent".to_string(),
         },
     ];
     let Some(formats) = take_or_cancel(
-        MultiSelect::new("Export as:", options)
+        MultiSelect::new("导出为：", options)
             .with_default(&[0])
             .with_validator(|opts: &[ListOption<&FormatOption>]| {
                 if opts.is_empty() {
-                    Ok(Validation::Invalid("select at least one format".into()))
+                    Ok(Validation::Invalid("至少选择一种格式".into()))
                 } else {
                     Ok(Validation::Valid)
                 }
@@ -875,11 +873,11 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
                     .map(|opt| format!("\n  • {}", opt.value.label))
                     .collect::<String>()
             })
-            .with_help_message("space: toggle · enter: next · esc: cancel")
+            .with_help_message("空格：选中/取消 · 回车：下一步 · Esc：取消")
             .prompt_skippable(),
-        "export formats",
+        "导出格式",
     )? else {
-        println!("cancelled");
+        println!("已取消");
         return Ok(0);
     };
     let want_torrents = formats.iter().any(|o| o.format == ExportFormat::TorrentFiles);
@@ -901,21 +899,21 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         loop {
             let autocomplete = PathAutocomplete { history: cfg.path_history.clone() };
             let Some(path_input) = take_or_cancel(
-                Text::new("Export to:")
+                Text::new("导出到：")
                     .with_initial_value(&initial)
                     .with_autocomplete(autocomplete)
                     .with_validator(|input: &str| {
                         if input.trim().is_empty() {
-                            Ok(Validation::Invalid("path must not be empty".into()))
+                            Ok(Validation::Invalid("路径不能为空".into()))
                         } else {
                             Ok(Validation::Valid)
                         }
                     })
-                    .with_help_message("↑/↓: browse history · tab: fill · enter: confirm · esc: cancel")
+                    .with_help_message("↑/↓：浏览历史 · Tab：填入 · 回车：确认 · Esc：取消")
                     .prompt_skippable(),
-                "the export path",
+                "导出路径",
             )? else {
-                println!("cancelled");
+                println!("已取消");
                 return Ok(0);
             };
             let trimmed = path_input.trim().to_string();
@@ -923,7 +921,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
             match std::fs::create_dir_all(&dir) {
                 Ok(()) => break Some(dir),
                 Err(e) => {
-                    eprintln!("cannot use {}: {e}", dir.display());
+                    eprintln!("无法使用 {}：{e}", dir.display());
                     initial = trimmed; // re-prompt with the typed value
                 }
             }
@@ -937,7 +935,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         match resolve_qbt(&cfg, &channel_title)? {
             Some(setup) => Some(setup),
             None => {
-                println!("cancelled");
+                println!("已取消");
                 return Ok(0);
             }
         }
@@ -951,9 +949,9 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         if let Some((name, profile)) = &setup.save_as {
             cfg.qbt.insert(name.clone(), profile.clone());
             if let Err(e) = cfg.save(&config_dir) {
-                eprintln!("warning: could not save the qBittorrent profile: {e:#}");
+                eprintln!("警告：无法保存 qBittorrent 配置：{e:#}");
             } else {
-                println!("profile \"{name}\" saved");
+                println!("配置「{name}」已保存");
             }
         }
         setup.client.ensure_category(&setup.category)?;
@@ -965,12 +963,12 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
     let totals = process_episodes(client, &selected, torrents_dir, qbt_setup.as_ref());
     if want_torrents {
         println!(
-            "{} downloaded, {} skipped, {} failed",
+            "已下载 {}，已跳过 {}，失败 {}",
             totals.downloaded, totals.skipped, totals.failed
         );
     }
     if want_qbt {
-        println!("{} added to qBittorrent, {} failed", totals.qbt_added, totals.qbt_failed);
+        println!("已添加到 qBittorrent {}，失败 {}", totals.qbt_added, totals.qbt_failed);
     }
 
     let mut url_list = None;
@@ -979,12 +977,12 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         let dir = export_dir.as_ref().expect("path was asked when urls are exported");
         match export::write_url_list(&selected, dir, &channel_title) {
             Ok(path) => {
-                println!("urls written to {}", path.display());
+                println!("URL 列表已写入 {}", path.display());
                 url_list = Some(path);
             }
             Err(e) => {
                 url_failed = true;
-                eprintln!("failed           url list: {e:#}");
+                eprintln!("失败           URL 列表：{e:#}");
             }
         }
     }
@@ -995,7 +993,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         if any_disk_success {
             cfg.record_path(&dir.to_string_lossy());
             if let Err(e) = cfg.save(&config_dir) {
-                eprintln!("warning: could not save path history: {e:#}");
+                eprintln!("警告：无法保存路径历史：{e:#}");
             }
         }
     }
@@ -1011,23 +1009,19 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
 fn headless(url: &str, args: &Args) -> Result<i32> {
     let client = build_client(args.proxy.as_deref())?;
     let feed::Feed { channel_title, episodes } = {
-        let _spinner = Spinner::start("fetching feed…");
+        let _spinner = Spinner::start("正在获取订阅…");
         feed::fetch_feed(&client, url).map_err(add_proxy_hint)?
     };
     if episodes.is_empty() {
-        bail!("feed \"{channel_title}\" contains no episodes");
+        bail!("订阅「{channel_title}」中没有剧集");
     }
 
     let selected = select::select(episodes, args.latest, args.filter.as_deref());
     if selected.is_empty() {
-        println!("no episodes matched");
+        println!("没有匹配的剧集");
         return Ok(0);
     }
-    println!(
-        "selected {} episode{}",
-        selected.len(),
-        if selected.len() == 1 { "" } else { "s" }
-    );
+    println!("已选择 {} 集", selected.len());
 
     // Resolve the qBittorrent profile read-only — no inline creation, no
     // prompts (this may run headless in cron).
@@ -1037,15 +1031,15 @@ fn headless(url: &str, args: &Args) -> Result<i32> {
             let profile = match cfg.qbt.get(profile_name) {
                 Some(profile) => profile.clone(),
                 None if cfg.qbt.is_empty() => {
-                    bail!("no such profile: {profile_name} — add one with: mikan qbt set")
+                    bail!("没有名为「{profile_name}」的配置 —— 使用 mikan qbt set 添加")
                 }
                 None => {
                     let names: Vec<&str> = cfg.qbt.keys().map(String::as_str).collect();
-                    bail!("no such profile: {profile_name} — saved profiles: {}", names.join(", "));
+                    bail!("没有名为「{profile_name}」的配置 —— 已保存的配置：{}", names.join(", "));
                 }
             };
             let client = connect_with_spinner(&profile)?;
-            println!("connected — qBittorrent {}", client.version());
+            println!("已连接 —— qBittorrent {}", client.version());
             let category = args
                 .category
                 .clone()
@@ -1057,27 +1051,27 @@ fn headless(url: &str, args: &Args) -> Result<i32> {
     };
 
     for dir in [args.out.as_ref(), args.url_list.as_ref()].into_iter().flatten() {
-        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(dir).with_context(|| format!("创建 {}", dir.display()))?;
     }
 
     let totals = process_episodes(&client, &selected, args.out.as_deref(), qbt_setup.as_ref());
     if args.out.is_some() {
         println!(
-            "{} downloaded, {} skipped, {} failed",
+            "已下载 {}，已跳过 {}，失败 {}",
             totals.downloaded, totals.skipped, totals.failed
         );
     }
     if args.qbt.is_some() {
-        println!("{} added to qBittorrent, {} failed", totals.qbt_added, totals.qbt_failed);
+        println!("已添加到 qBittorrent {}，失败 {}", totals.qbt_added, totals.qbt_failed);
     }
 
     let mut url_failed = false;
     if let Some(dir) = &args.url_list {
         match export::write_url_list(&selected, dir, &channel_title) {
-            Ok(path) => println!("urls written to {}", path.display()),
+            Ok(path) => println!("URL 列表已写入 {}", path.display()),
             Err(e) => {
                 url_failed = true;
-                eprintln!("failed           url list: {e:#}");
+                eprintln!("失败           URL 列表：{e:#}");
             }
         }
     }
@@ -1095,7 +1089,7 @@ fn take_or_cancel<T>(
     match result {
         Ok(value) => Ok(value),
         Err(InquireError::OperationInterrupted) => Ok(None),
-        Err(e) => Err(e).with_context(|| format!("asking for {what}")),
+        Err(e) => Err(e).with_context(|| format!("获取{what}")),
     }
 }
 
@@ -1106,26 +1100,26 @@ fn prompt_profile(existing: Option<&config::QbtProfile>) -> Result<Option<config
         .map(|p| p.endpoint.clone())
         .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
     let Some(endpoint) = take_or_cancel(
-        Text::new("qBittorrent WebUI endpoint:")
+        Text::new("qBittorrent WebUI 地址：")
             .with_initial_value(&default_endpoint)
             .with_validator(|input: &str| {
                 let input = input.trim();
                 if input.starts_with("http://") || input.starts_with("https://") {
                     Ok(Validation::Valid)
                 } else {
-                    Ok(Validation::Invalid("must start with http:// or https://".into()))
+                    Ok(Validation::Invalid("必须以 http:// 或 https:// 开头".into()))
                 }
             })
             .prompt_skippable(),
-        "the qBittorrent endpoint",
+        "qBittorrent 地址",
     )? else {
         return Ok(None);
     };
     let Some(username) = take_or_cancel(
-        Text::new("Username (leave empty for qBt's localhost auth bypass):")
+        Text::new("用户名（留空则使用 qBittorrent 的本机免认证）：")
             .with_initial_value(existing.map(|p| p.username.as_str()).unwrap_or(""))
             .prompt_skippable(),
-        "the username",
+        "用户名",
     )? else {
         return Ok(None);
     };
@@ -1133,11 +1127,11 @@ fn prompt_profile(existing: Option<&config::QbtProfile>) -> Result<Option<config
         String::new()
     } else {
         let Some(password) = take_or_cancel(
-            Password::new("Password:")
+            Password::new("密码：")
                 .without_confirmation()
                 .with_display_mode(PasswordDisplayMode::Masked)
                 .prompt_skippable(),
-            "the password",
+            "密码",
         )? else {
             return Ok(None);
         };
@@ -1164,7 +1158,7 @@ fn profile_name_or_default(name: Option<String>) -> Result<String> {
         Some(n) => {
             let n = n.trim().to_string();
             if n.is_empty() {
-                bail!("profile name must not be empty");
+                bail!("配置名称不能为空");
             }
             Ok(n)
         }
@@ -1186,20 +1180,20 @@ fn qbt_command(action: QbtAction) -> Result<i32> {
         QbtAction::Set { name } => {
             let name = profile_name_or_default(name)?;
             let Some((_client, profile)) = prompt_and_connect(cfg.qbt.get(&name))? else {
-                println!("cancelled");
+                println!("已取消");
                 return Ok(0);
             };
             cfg.qbt.insert(name.clone(), profile);
-            cfg.save(&dir).context("saving config")?;
-            println!("profile \"{name}\" saved");
+            cfg.save(&dir).context("保存配置")?;
+            println!("配置「{name}」已保存");
             Ok(0)
         }
         QbtAction::List => {
             if cfg.qbt.is_empty() {
-                println!("no profiles — add one with: mikan qbt set");
+                println!("暂无配置 —— 使用 mikan qbt set 添加");
             }
             for (name, profile) in &cfg.qbt {
-                let user = if profile.username.is_empty() { "(no auth)" } else { profile.username.as_str() };
+                let user = if profile.username.is_empty() { "（免认证）" } else { profile.username.as_str() };
                 println!("{name}: {} {user}", profile.endpoint);
             }
             Ok(0)
@@ -1207,17 +1201,17 @@ fn qbt_command(action: QbtAction) -> Result<i32> {
         QbtAction::Remove { name } => {
             let name = name.trim().to_string();
             if name.is_empty() {
-                bail!("profile name must not be empty");
+                bail!("配置名称不能为空");
             }
             if cfg.qbt.remove(&name).is_none() {
                 if cfg.qbt.is_empty() {
-                    bail!("no such profile: {name} — there are no saved profiles");
+                    bail!("没有名为「{name}」的配置 —— 暂无已保存的配置");
                 }
                 let names: Vec<&str> = cfg.qbt.keys().map(String::as_str).collect();
-                bail!("no such profile: {name} — saved profiles: {}", names.join(", "));
+                bail!("没有名为「{name}」的配置 —— 已保存的配置：{}", names.join(", "));
             }
-            cfg.save(&dir).context("saving config")?;
-            println!("profile \"{name}\" removed");
+            cfg.save(&dir).context("保存配置")?;
+            println!("配置「{name}」已删除");
             Ok(0)
         }
         QbtAction::Test { name } => {
@@ -1225,15 +1219,15 @@ fn qbt_command(action: QbtAction) -> Result<i32> {
             let profile = match cfg.qbt.get(&name) {
                 Some(profile) => profile,
                 None if cfg.qbt.is_empty() => {
-                    bail!("no such profile: {name} — add one with: mikan qbt set")
+                    bail!("没有名为「{name}」的配置 —— 使用 mikan qbt set 添加")
                 }
                 None => {
                     let names: Vec<&str> = cfg.qbt.keys().map(String::as_str).collect();
-                    bail!("no such profile: {name} — saved profiles: {}", names.join(", "))
+                    bail!("没有名为「{name}」的配置 —— 已保存的配置：{}", names.join(", "))
                 }
             };
             let client = connect_with_spinner(profile)?;
-            println!("connected — qBittorrent {} at {}", client.version(), profile.endpoint);
+            println!("已连接 —— qBittorrent {} @ {}", client.version(), profile.endpoint);
             Ok(0)
         }
     }
@@ -1279,19 +1273,18 @@ mod tests {
         let opts: Vec<ListOption<&Row>> =
             rows.iter().enumerate().map(|(i, r)| ListOption::new(i, r)).collect();
         let summary = episode_selection_summary(&opts);
-        assert!(summary.contains("2 episodes · 1.63 GiB"), "was: {summary}");
+        assert!(summary.contains("2 集 · 1.63 GiB"), "was: {summary}");
         assert!(summary.contains("\n  • Anime - 01"), "was: {summary}");
         assert!(summary.contains("\n  • Anime - 02"), "was: {summary}");
     }
 
     #[test]
-    fn episode_summary_is_singular_and_omits_unknown_size() {
+    fn episode_summary_has_no_plural_form_and_omits_unknown_size() {
         let mut episode = ep("Solo", None);
         episode.size = None;
         let row = Row(episode);
         let summary = episode_selection_summary(&[ListOption::new(0, &row)]);
-        assert!(summary.contains("1 episode"), "was: {summary}");
-        assert!(!summary.contains("episodes"), "should be singular: {summary}");
+        assert!(summary.contains("1 集"), "was: {summary}");
         assert!(!summary.contains('·'), "no size divider when unknown: {summary}");
     }
 
@@ -1309,21 +1302,21 @@ mod tests {
     fn proxy_hint_added_for_gateway_errors() {
         let err = anyhow::anyhow!("HTTP status server error (502 Bad Gateway) for url (http://x/)");
         let hinted = format!("{:#}", add_proxy_hint(err));
-        assert!(hinted.contains("check your proxy"), "was: {hinted}");
+        assert!(hinted.contains("检查代理"), "was: {hinted}");
     }
 
     #[test]
     fn proxy_hint_added_for_connect_errors() {
         let err = anyhow::anyhow!("error sending request: connection refused");
         let hinted = format!("{:#}", add_proxy_hint(err));
-        assert!(hinted.contains("check your proxy"), "was: {hinted}");
+        assert!(hinted.contains("检查代理"), "was: {hinted}");
     }
 
     #[test]
     fn no_proxy_hint_for_plain_http_404() {
         let err = anyhow::anyhow!("HTTP status client error (404 Not Found) for url (https://mikanani.me/RSS/x)");
         let hinted = format!("{:#}", add_proxy_hint(err));
-        assert!(!hinted.contains("check your proxy"), "was: {hinted}");
+        assert!(!hinted.contains("检查代理"), "was: {hinted}");
     }
 
     #[test]
@@ -1399,14 +1392,14 @@ mod tests {
     fn show_choice_display() {
         let pick = ShowChoice::Pick(mikan::Show { title: "石纪元".to_string(), id: 3689 });
         assert_eq!(pick.to_string(), "石纪元");
-        assert_eq!(ShowChoice::SearchAgain.to_string(), "↻ 重新搜索 (search again)");
+        assert_eq!(ShowChoice::SearchAgain.to_string(), "↻ 重新搜索");
     }
 
     #[test]
     fn group_nav_display() {
         let group = GroupNav::Group(mikan::Subgroup { name: "猎户发布组".to_string(), id: 597 });
         assert_eq!(group.to_string(), "猎户发布组");
-        assert_eq!(GroupNav::Back.to_string(), "← 返回上一步 (back to shows)");
+        assert_eq!(GroupNav::Back.to_string(), "← 返回上一步");
     }
 
     #[test]
@@ -1434,11 +1427,11 @@ mod tests {
         let a = Args::try_parse_from(["mikan", "http://x/rss", "-y", "--all"]).unwrap();
         assert_eq!(
             headless_precondition(&a).unwrap_err(),
-            "specify at least one of --out, --url-list, --qbt"
+            "请至少指定 --out、--url-list、--qbt 之一"
         );
 
         let a = Args::try_parse_from(["mikan", "http://x/rss", "-y", "--qbt"]).unwrap();
-        assert_eq!(headless_precondition(&a).unwrap_err(), "specify --all, --latest, or --filter");
+        assert_eq!(headless_precondition(&a).unwrap_err(), "请指定 --all、--latest 或 --filter");
 
         let a = Args::try_parse_from(["mikan", "http://x/rss", "-y", "--all", "--qbt"]).unwrap();
         assert!(headless_precondition(&a).is_ok());
@@ -1480,7 +1473,7 @@ mod tests {
             SubgroupChoice::Menu(opts) => {
                 assert_eq!(opts.len(), 3);
                 assert_eq!(opts[0].id, 0);
-                assert!(opts[0].name.contains("all groups"));
+                assert!(opts[0].name.contains("全部字幕组"));
                 assert_eq!(opts[1].id, 597);
                 assert_eq!(opts[2].id, 611);
             }

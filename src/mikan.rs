@@ -153,11 +153,11 @@ pub fn search_shows(client: &reqwest::blocking::Client, query: &str) -> Result<V
         .get(format!("{BASE}/Home/Search"))
         .query(&[("searchstr", query)])
         .send()
-        .context("requesting Mikan search")?
+        .context("请求蜜柑搜索")?
         .error_for_status()
-        .context("Mikan search request rejected")?
+        .context("蜜柑搜索请求被拒绝")?
         .text()
-        .context("reading Mikan search results")?;
+        .context("读取蜜柑搜索结果")?;
     Ok(parse_shows(&html))
 }
 
@@ -167,11 +167,11 @@ pub fn subgroups(client: &reqwest::blocking::Client, bangumi_id: u32) -> Result<
     let html = client
         .get(format!("{BASE}/Home/Bangumi/{bangumi_id}"))
         .send()
-        .context("requesting the Mikan bangumi page")?
+        .context("请求蜜柑番剧页面")?
         .error_for_status()
-        .context("Mikan bangumi request rejected")?
+        .context("蜜柑番剧页面请求被拒绝")?
         .text()
-        .context("reading the Mikan bangumi page")?;
+        .context("读取蜜柑番剧页面")?;
     Ok(parse_subgroups(&html))
 }
 

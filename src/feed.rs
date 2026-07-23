@@ -20,11 +20,11 @@ pub fn fetch_feed(client: &reqwest::blocking::Client, url: &str) -> anyhow::Resu
     let xml = client
         .get(url)
         .send()
-        .context("requesting the RSS feed")?
+        .context("请求 RSS 订阅")?
         .error_for_status()
-        .context("feed request rejected")?
+        .context("订阅请求被拒绝")?
         .text()
-        .context("reading the feed body")?;
+        .context("读取订阅内容")?;
     parse_feed(&xml)
 }
 
@@ -36,7 +36,7 @@ pub fn parse_feed(xml: &str) -> anyhow::Result<Feed> {
     let mut current: Option<Episode> = None;
 
     loop {
-        match reader.read_event().context("parsing feed XML")? {
+        match reader.read_event().context("解析订阅 XML")? {
             Event::Start(e) => {
                 let name = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
                 if name == "item" {
