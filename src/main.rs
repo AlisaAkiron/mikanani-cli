@@ -198,6 +198,13 @@ enum ExportFormat {
     Qbt,
 }
 
+/// How the export flow ended: a normal process exit (with its code), or a
+/// request to return to the previous wizard step (search flow only).
+enum ExportOutcome {
+    Exit(i32),
+    Back,
+}
+
 struct FormatOption {
     format: ExportFormat,
     label: String,
@@ -678,7 +685,11 @@ fn wizard(url: &str, proxy: Option<&str>) -> Result<i32> {
     if feed.episodes.is_empty() {
         bail!("订阅「{}」中没有剧集", feed.channel_title);
     }
-    run_export_flow(&client, feed)
+    match run_export_flow(&client, feed, false)? {
+        ExportOutcome::Exit(code) => Ok(code),
+        // can_go_back is false above, so the picker never yields Back.
+        ExportOutcome::Back => Ok(0),
+    }
 }
 
 /// Interactive search entry point: resolve a query, pick a show, pick a
@@ -773,72 +784,103 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
                 ShowChoice::Pick(show) => show,
             };
 
-            // Fetch subtitle groups and decide the subgroup.
+            // Fetch subtitle groups once per show; the 'group loop below
+            // re-shows the menu (without re-scraping) when a later step
+            // navigates back.
             let groups = {
                 let _spinner = Spinner::start("正在加载字幕组…");
                 mikan::subgroups(&client, show.id).map_err(add_proxy_hint)?
             };
-            let subgroup_id = match subgroup_choice(groups) {
-                SubgroupChoice::Auto(id) => id,
-                SubgroupChoice::Menu(options) => {
-                    let mut nav: Vec<GroupNav> = options.into_iter().map(GroupNav::Group).collect();
-                    nav.push(GroupNav::Back);
-                    let Some(chosen) = take_or_cancel(
-                        inquire::Select::new("字幕组：", nav)
-                            .with_help_message("输入以筛选 · 回车：选择 · Esc：取消")
-                            .prompt_skippable(),
-                        "字幕组",
-                    )?
-                    else {
-                        println!("已取消");
-                        return Ok(0);
-                    };
-                    match chosen {
-                        GroupNav::Group(group) => group.id,
-                        GroupNav::Back => continue 'show,
+            let choice = subgroup_choice(groups);
+            // Where "back" lands: the group menu when one exists, else the
+            // show list (the group step was auto-skipped).
+            let has_menu = matches!(choice, SubgroupChoice::Menu(_));
+            'group: loop {
+                let subgroup_id = match &choice {
+                    SubgroupChoice::Auto(id) => *id,
+                    SubgroupChoice::Menu(options) => {
+                        let mut nav: Vec<GroupNav> =
+                            options.iter().cloned().map(GroupNav::Group).collect();
+                        nav.push(GroupNav::Back);
+                        let Some(chosen) = take_or_cancel(
+                            inquire::Select::new("字幕组：", nav)
+                                .with_help_message("输入以筛选 · 回车：选择 · Esc：取消")
+                                .prompt_skippable(),
+                            "字幕组",
+                        )?
+                        else {
+                            println!("已取消");
+                            return Ok(0);
+                        };
+                        match chosen {
+                            GroupNav::Group(group) => group.id,
+                            GroupNav::Back => continue 'show,
+                        }
+                    }
+                };
+
+                // Build the RSS URL and reuse the shared export flow.
+                let url = rss_url(show.id, subgroup_id);
+                let feed = {
+                    let _spinner = Spinner::start("正在获取订阅…");
+                    feed::fetch_feed(&client, &url).map_err(add_proxy_hint)?
+                };
+                // A dud choice (empty feed) navigates back instead of
+                // aborting, like Esc from the episode picker.
+                if feed.episodes.is_empty() {
+                    println!("订阅「{}」中没有剧集", feed.channel_title);
+                    if has_menu {
+                        continue 'group;
+                    }
+                    continue 'show;
+                }
+                match run_export_flow(&client, feed, true)? {
+                    ExportOutcome::Exit(code) => return Ok(code),
+                    ExportOutcome::Back => {
+                        if has_menu {
+                            continue 'group;
+                        }
+                        continue 'show;
                     }
                 }
-            };
-
-            // Build the RSS URL and reuse the shared export flow.
-            let url = rss_url(show.id, subgroup_id);
-            let feed = {
-                let _spinner = Spinner::start("正在获取订阅…");
-                feed::fetch_feed(&client, &url).map_err(add_proxy_hint)?
-            };
-            if feed.episodes.is_empty() {
-                bail!("订阅「{}」中没有剧集", feed.channel_title);
             }
-            return run_export_flow(&client, feed);
         }
     }
 }
 
 /// Runs the interactive picker → format → path → qBittorrent → execute steps
 /// over an already-fetched feed. Shared by the URL wizard and the search flow.
-fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Result<i32> {
+/// `can_go_back` lets the episode picker's Esc return to the caller's
+/// previous step (`ExportOutcome::Back`) instead of cancelling — the search
+/// flow has a subtitle-group step to go back to; the URL wizard does not.
+fn run_export_flow(
+    client: &reqwest::blocking::Client,
+    feed: feed::Feed,
+    can_go_back: bool,
+) -> Result<ExportOutcome> {
     let feed::Feed { channel_title, episodes } = feed;
 
     // Step 1: pick episodes.
     let rows: Vec<Row> = select::sort_episodes(episodes).into_iter().map(Row).collect();
-    let picked = match MultiSelect::new(&channel_title, rows)
+    let result = MultiSelect::new(&channel_title, rows)
         .with_page_size(15)
         .with_formatter(&|selected| episode_selection_summary(selected))
-        .with_help_message("输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：取消")
-        .prompt_skippable()
-    {
-        Ok(Some(picked)) if !picked.is_empty() => picked,
-        Ok(Some(_)) => {
+        .with_help_message(episode_picker_help(can_go_back))
+        .prompt_skippable();
+    let picked = match classify_pick(result, can_go_back)? {
+        PickerAction::Picked(picked) => picked,
+        PickerAction::NothingTicked => {
             // Enter with nothing ticked — a deliberate "never mind".
             println!("未选择任何内容");
-            return Ok(0);
+            return Ok(ExportOutcome::Exit(0));
         }
-        Ok(None) | Err(InquireError::OperationInterrupted) => {
-            // Esc or Ctrl-C — the same "cancelled" as every later step.
+        PickerAction::Back => return Ok(ExportOutcome::Back),
+        PickerAction::Cancel => {
+            // Esc (with no step to go back to) or Ctrl-C — the same
+            // "cancelled" as every later step.
             println!("已取消");
-            return Ok(0);
+            return Ok(ExportOutcome::Exit(0));
         }
-        Err(e) => return Err(e).context("显示剧集选择器"),
     };
     let selected: Vec<Episode> = picked.into_iter().map(|row| row.0).collect();
 
@@ -878,7 +920,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         "导出格式",
     )? else {
         println!("已取消");
-        return Ok(0);
+        return Ok(ExportOutcome::Exit(0));
     };
     let want_torrents = formats.iter().any(|o| o.format == ExportFormat::TorrentFiles);
     let want_urls = formats.iter().any(|o| o.format == ExportFormat::UrlList);
@@ -914,7 +956,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
                 "导出路径",
             )? else {
                 println!("已取消");
-                return Ok(0);
+                return Ok(ExportOutcome::Exit(0));
             };
             let trimmed = path_input.trim().to_string();
             let dir = PathBuf::from(expand_tilde(&trimmed));
@@ -936,7 +978,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
             Some(setup) => Some(setup),
             None => {
                 println!("已取消");
-                return Ok(0);
+                return Ok(ExportOutcome::Exit(0));
             }
         }
     } else {
@@ -999,7 +1041,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
     }
 
     let any_failure = totals.failed > 0 || totals.qbt_failed > 0 || url_failed;
-    Ok(if any_failure { 1 } else { 0 })
+    Ok(ExportOutcome::Exit(if any_failure { 1 } else { 0 }))
 }
 
 /// Non-interactive counterpart to `wizard`: no prompts, driven entirely by
@@ -1078,6 +1120,40 @@ fn headless(url: &str, args: &Args) -> Result<i32> {
 
     let any_failure = totals.failed > 0 || totals.qbt_failed > 0 || url_failed;
     Ok(if any_failure { 1 } else { 0 })
+}
+
+/// What the episode picker's outcome means for the flow. Esc means "back"
+/// only when there is a previous step to return to (the search flow);
+/// Ctrl-C always cancels. Generic over the row type so it is testable
+/// without building inquire rows.
+enum PickerAction<T> {
+    Picked(Vec<T>),
+    NothingTicked,
+    Back,
+    Cancel,
+}
+
+/// Help line for the episode picker; Esc's meaning depends on whether a
+/// previous step exists to go back to.
+fn episode_picker_help(can_go_back: bool) -> &'static str {
+    if can_go_back {
+        "输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：返回上一步"
+    } else {
+        "输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：取消"
+    }
+}
+
+fn classify_pick<T>(
+    result: Result<Option<Vec<T>>, InquireError>,
+    can_go_back: bool,
+) -> Result<PickerAction<T>> {
+    match result {
+        Ok(Some(picked)) if !picked.is_empty() => Ok(PickerAction::Picked(picked)),
+        Ok(Some(_)) => Ok(PickerAction::NothingTicked),
+        Ok(None) if can_go_back => Ok(PickerAction::Back),
+        Ok(None) | Err(InquireError::OperationInterrupted) => Ok(PickerAction::Cancel),
+        Err(e) => Err(e).context("显示剧集选择器"),
+    }
 }
 
 /// Collapses inquire's two cancellation signals (Esc ⇒ Ok(None), Ctrl-C ⇒
@@ -1498,5 +1574,45 @@ mod tests {
             a.command,
             Some(Command::Search { proxy: Some(ref p), .. }) if p == "http://127.0.0.1:7890"
         ));
+    }
+
+    #[test]
+    fn classify_pick_routes_esc_by_context() {
+        // Esc (Ok(None)) goes back only when a previous step exists.
+        assert!(matches!(classify_pick::<u8>(Ok(None), true), Ok(PickerAction::Back)));
+        assert!(matches!(classify_pick::<u8>(Ok(None), false), Ok(PickerAction::Cancel)));
+    }
+
+    #[test]
+    fn classify_pick_ctrl_c_always_cancels() {
+        for can_go_back in [true, false] {
+            assert!(matches!(
+                classify_pick::<u8>(Err(InquireError::OperationInterrupted), can_go_back),
+                Ok(PickerAction::Cancel)
+            ));
+        }
+    }
+
+    #[test]
+    fn classify_pick_selection_and_empty() {
+        assert!(matches!(
+            classify_pick(Ok(Some(vec![1u8, 2])), true),
+            Ok(PickerAction::Picked(v)) if v == vec![1, 2]
+        ));
+        assert!(matches!(
+            classify_pick::<u8>(Ok(Some(vec![])), true),
+            Ok(PickerAction::NothingTicked)
+        ));
+    }
+
+    #[test]
+    fn classify_pick_real_errors_propagate() {
+        assert!(classify_pick::<u8>(Err(InquireError::NotTTY), false).is_err());
+    }
+
+    #[test]
+    fn episode_picker_help_reflects_back_context() {
+        assert!(episode_picker_help(true).ends_with("Esc：返回上一步"));
+        assert!(episode_picker_help(false).ends_with("Esc：取消"));
     }
 }
