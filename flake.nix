@@ -53,7 +53,7 @@
 
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "mikan";
-          version = "0.3.0";
+          version = "0.4.0";
 
           src = ./.;
 
