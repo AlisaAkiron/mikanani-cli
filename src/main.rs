@@ -784,45 +784,65 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
                 ShowChoice::Pick(show) => show,
             };
 
-            // Fetch subtitle groups and decide the subgroup.
+            // Fetch subtitle groups once per show; the 'group loop below
+            // re-shows the menu (without re-scraping) when a later step
+            // navigates back.
             let groups = {
                 let _spinner = Spinner::start("正在加载字幕组…");
                 mikan::subgroups(&client, show.id).map_err(add_proxy_hint)?
             };
-            let subgroup_id = match subgroup_choice(groups) {
-                SubgroupChoice::Auto(id) => id,
-                SubgroupChoice::Menu(options) => {
-                    let mut nav: Vec<GroupNav> = options.into_iter().map(GroupNav::Group).collect();
-                    nav.push(GroupNav::Back);
-                    let Some(chosen) = take_or_cancel(
-                        inquire::Select::new("字幕组：", nav)
-                            .with_help_message("输入以筛选 · 回车：选择 · Esc：取消")
-                            .prompt_skippable(),
-                        "字幕组",
-                    )?
-                    else {
-                        println!("已取消");
-                        return Ok(0);
-                    };
-                    match chosen {
-                        GroupNav::Group(group) => group.id,
-                        GroupNav::Back => continue 'show,
+            let choice = subgroup_choice(groups);
+            // Where "back" lands: the group menu when one exists, else the
+            // show list (the group step was auto-skipped).
+            let has_menu = matches!(choice, SubgroupChoice::Menu(_));
+            'group: loop {
+                let subgroup_id = match &choice {
+                    SubgroupChoice::Auto(id) => *id,
+                    SubgroupChoice::Menu(options) => {
+                        let mut nav: Vec<GroupNav> =
+                            options.iter().cloned().map(GroupNav::Group).collect();
+                        nav.push(GroupNav::Back);
+                        let Some(chosen) = take_or_cancel(
+                            inquire::Select::new("字幕组：", nav)
+                                .with_help_message("输入以筛选 · 回车：选择 · Esc：取消")
+                                .prompt_skippable(),
+                            "字幕组",
+                        )?
+                        else {
+                            println!("已取消");
+                            return Ok(0);
+                        };
+                        match chosen {
+                            GroupNav::Group(group) => group.id,
+                            GroupNav::Back => continue 'show,
+                        }
+                    }
+                };
+
+                // Build the RSS URL and reuse the shared export flow.
+                let url = rss_url(show.id, subgroup_id);
+                let feed = {
+                    let _spinner = Spinner::start("正在获取订阅…");
+                    feed::fetch_feed(&client, &url).map_err(add_proxy_hint)?
+                };
+                // A dud choice (empty feed) navigates back instead of
+                // aborting, like Esc from the episode picker.
+                if feed.episodes.is_empty() {
+                    println!("订阅「{}」中没有剧集", feed.channel_title);
+                    if has_menu {
+                        continue 'group;
+                    }
+                    continue 'show;
+                }
+                match run_export_flow(&client, feed, true)? {
+                    ExportOutcome::Exit(code) => return Ok(code),
+                    ExportOutcome::Back => {
+                        if has_menu {
+                            continue 'group;
+                        }
+                        continue 'show;
                     }
                 }
-            };
-
-            // Build the RSS URL and reuse the shared export flow.
-            let url = rss_url(show.id, subgroup_id);
-            let feed = {
-                let _spinner = Spinner::start("正在获取订阅…");
-                feed::fetch_feed(&client, &url).map_err(add_proxy_hint)?
-            };
-            if feed.episodes.is_empty() {
-                bail!("订阅「{}」中没有剧集", feed.channel_title);
-            }
-            match run_export_flow(&client, feed, true)? {
-                ExportOutcome::Exit(code) => return Ok(code),
-                ExportOutcome::Back => continue 'show,
             }
         }
     }
