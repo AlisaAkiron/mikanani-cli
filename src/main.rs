@@ -198,6 +198,13 @@ enum ExportFormat {
     Qbt,
 }
 
+/// How the export flow ended: a normal process exit (with its code), or a
+/// request to return to the previous wizard step (search flow only).
+enum ExportOutcome {
+    Exit(i32),
+    Back,
+}
+
 struct FormatOption {
     format: ExportFormat,
     label: String,
@@ -678,7 +685,11 @@ fn wizard(url: &str, proxy: Option<&str>) -> Result<i32> {
     if feed.episodes.is_empty() {
         bail!("订阅「{}」中没有剧集", feed.channel_title);
     }
-    run_export_flow(&client, feed)
+    match run_export_flow(&client, feed, false)? {
+        ExportOutcome::Exit(code) => Ok(code),
+        // can_go_back is false above, so the picker never yields Back.
+        ExportOutcome::Back => Ok(0),
+    }
 }
 
 /// Interactive search entry point: resolve a query, pick a show, pick a
@@ -809,36 +820,47 @@ fn search_flow(query: Option<String>, proxy: Option<&str>) -> Result<i32> {
             if feed.episodes.is_empty() {
                 bail!("订阅「{}」中没有剧集", feed.channel_title);
             }
-            return run_export_flow(&client, feed);
+            match run_export_flow(&client, feed, true)? {
+                ExportOutcome::Exit(code) => return Ok(code),
+                ExportOutcome::Back => continue 'show,
+            }
         }
     }
 }
 
 /// Runs the interactive picker → format → path → qBittorrent → execute steps
 /// over an already-fetched feed. Shared by the URL wizard and the search flow.
-fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Result<i32> {
+/// `can_go_back` lets the episode picker's Esc return to the caller's
+/// previous step (`ExportOutcome::Back`) instead of cancelling — the search
+/// flow has a subtitle-group step to go back to; the URL wizard does not.
+fn run_export_flow(
+    client: &reqwest::blocking::Client,
+    feed: feed::Feed,
+    can_go_back: bool,
+) -> Result<ExportOutcome> {
     let feed::Feed { channel_title, episodes } = feed;
 
     // Step 1: pick episodes.
     let rows: Vec<Row> = select::sort_episodes(episodes).into_iter().map(Row).collect();
-    let picked = match MultiSelect::new(&channel_title, rows)
+    let result = MultiSelect::new(&channel_title, rows)
         .with_page_size(15)
         .with_formatter(&|selected| episode_selection_summary(selected))
-        .with_help_message("输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：取消")
-        .prompt_skippable()
-    {
-        Ok(Some(picked)) if !picked.is_empty() => picked,
-        Ok(Some(_)) => {
+        .with_help_message(episode_picker_help(can_go_back))
+        .prompt_skippable();
+    let picked = match classify_pick(result, can_go_back)? {
+        PickerAction::Picked(picked) => picked,
+        PickerAction::NothingTicked => {
             // Enter with nothing ticked — a deliberate "never mind".
             println!("未选择任何内容");
-            return Ok(0);
+            return Ok(ExportOutcome::Exit(0));
         }
-        Ok(None) | Err(InquireError::OperationInterrupted) => {
-            // Esc or Ctrl-C — the same "cancelled" as every later step.
+        PickerAction::Back => return Ok(ExportOutcome::Back),
+        PickerAction::Cancel => {
+            // Esc (with no step to go back to) or Ctrl-C — the same
+            // "cancelled" as every later step.
             println!("已取消");
-            return Ok(0);
+            return Ok(ExportOutcome::Exit(0));
         }
-        Err(e) => return Err(e).context("显示剧集选择器"),
     };
     let selected: Vec<Episode> = picked.into_iter().map(|row| row.0).collect();
 
@@ -878,7 +900,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
         "导出格式",
     )? else {
         println!("已取消");
-        return Ok(0);
+        return Ok(ExportOutcome::Exit(0));
     };
     let want_torrents = formats.iter().any(|o| o.format == ExportFormat::TorrentFiles);
     let want_urls = formats.iter().any(|o| o.format == ExportFormat::UrlList);
@@ -914,7 +936,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
                 "导出路径",
             )? else {
                 println!("已取消");
-                return Ok(0);
+                return Ok(ExportOutcome::Exit(0));
             };
             let trimmed = path_input.trim().to_string();
             let dir = PathBuf::from(expand_tilde(&trimmed));
@@ -936,7 +958,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
             Some(setup) => Some(setup),
             None => {
                 println!("已取消");
-                return Ok(0);
+                return Ok(ExportOutcome::Exit(0));
             }
         }
     } else {
@@ -999,7 +1021,7 @@ fn run_export_flow(client: &reqwest::blocking::Client, feed: feed::Feed) -> Resu
     }
 
     let any_failure = totals.failed > 0 || totals.qbt_failed > 0 || url_failed;
-    Ok(if any_failure { 1 } else { 0 })
+    Ok(ExportOutcome::Exit(if any_failure { 1 } else { 0 }))
 }
 
 /// Non-interactive counterpart to `wizard`: no prompts, driven entirely by
@@ -1084,7 +1106,6 @@ fn headless(url: &str, args: &Args) -> Result<i32> {
 /// only when there is a previous step to return to (the search flow);
 /// Ctrl-C always cancels. Generic over the row type so it is testable
 /// without building inquire rows.
-#[allow(dead_code)] // wired into run_export_flow in the next commit
 enum PickerAction<T> {
     Picked(Vec<T>),
     NothingTicked,
@@ -1094,7 +1115,6 @@ enum PickerAction<T> {
 
 /// Help line for the episode picker; Esc's meaning depends on whether a
 /// previous step exists to go back to.
-#[allow(dead_code)] // wired into run_export_flow in the next commit
 fn episode_picker_help(can_go_back: bool) -> &'static str {
     if can_go_back {
         "输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：返回上一步"
@@ -1103,7 +1123,6 @@ fn episode_picker_help(can_go_back: bool) -> &'static str {
     }
 }
 
-#[allow(dead_code)] // wired into run_export_flow in the next commit
 fn classify_pick<T>(
     result: Result<Option<Vec<T>>, InquireError>,
     can_go_back: bool,
