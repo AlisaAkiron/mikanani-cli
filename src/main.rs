@@ -1080,6 +1080,32 @@ fn headless(url: &str, args: &Args) -> Result<i32> {
     Ok(if any_failure { 1 } else { 0 })
 }
 
+/// What the episode picker's outcome means for the flow. Esc means "back"
+/// only when there is a previous step to return to (the search flow);
+/// Ctrl-C always cancels. Generic over the row type so it is testable
+/// without building inquire rows.
+#[allow(dead_code)] // wired into run_export_flow in the next commit
+enum PickerAction<T> {
+    Picked(Vec<T>),
+    NothingTicked,
+    Back,
+    Cancel,
+}
+
+#[allow(dead_code)] // wired into run_export_flow in the next commit
+fn classify_pick<T>(
+    result: Result<Option<Vec<T>>, InquireError>,
+    can_go_back: bool,
+) -> Result<PickerAction<T>> {
+    match result {
+        Ok(Some(picked)) if !picked.is_empty() => Ok(PickerAction::Picked(picked)),
+        Ok(Some(_)) => Ok(PickerAction::NothingTicked),
+        Ok(None) if can_go_back => Ok(PickerAction::Back),
+        Ok(None) | Err(InquireError::OperationInterrupted) => Ok(PickerAction::Cancel),
+        Err(e) => Err(e).context("显示剧集选择器"),
+    }
+}
+
 /// Collapses inquire's two cancellation signals (Esc ⇒ Ok(None), Ctrl-C ⇒
 /// OperationInterrupted) into Ok(None); real errors keep their context.
 fn take_or_cancel<T>(
@@ -1498,5 +1524,39 @@ mod tests {
             a.command,
             Some(Command::Search { proxy: Some(ref p), .. }) if p == "http://127.0.0.1:7890"
         ));
+    }
+
+    #[test]
+    fn classify_pick_routes_esc_by_context() {
+        // Esc (Ok(None)) goes back only when a previous step exists.
+        assert!(matches!(classify_pick::<u8>(Ok(None), true), Ok(PickerAction::Back)));
+        assert!(matches!(classify_pick::<u8>(Ok(None), false), Ok(PickerAction::Cancel)));
+    }
+
+    #[test]
+    fn classify_pick_ctrl_c_always_cancels() {
+        for can_go_back in [true, false] {
+            assert!(matches!(
+                classify_pick::<u8>(Err(InquireError::OperationInterrupted), can_go_back),
+                Ok(PickerAction::Cancel)
+            ));
+        }
+    }
+
+    #[test]
+    fn classify_pick_selection_and_empty() {
+        assert!(matches!(
+            classify_pick(Ok(Some(vec![1u8, 2])), true),
+            Ok(PickerAction::Picked(v)) if v == vec![1, 2]
+        ));
+        assert!(matches!(
+            classify_pick::<u8>(Ok(Some(vec![])), true),
+            Ok(PickerAction::NothingTicked)
+        ));
+    }
+
+    #[test]
+    fn classify_pick_real_errors_propagate() {
+        assert!(classify_pick::<u8>(Err(InquireError::NotTTY), false).is_err());
     }
 }
