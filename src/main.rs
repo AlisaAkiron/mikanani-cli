@@ -1092,6 +1092,17 @@ enum PickerAction<T> {
     Cancel,
 }
 
+/// Help line for the episode picker; Esc's meaning depends on whether a
+/// previous step exists to go back to.
+#[allow(dead_code)] // wired into run_export_flow in the next commit
+fn episode_picker_help(can_go_back: bool) -> &'static str {
+    if can_go_back {
+        "输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：返回上一步"
+    } else {
+        "输入以筛选 · 空格：选中/取消 · →/←：全选/全不选 · 回车：下一步 · Esc：取消"
+    }
+}
+
 #[allow(dead_code)] // wired into run_export_flow in the next commit
 fn classify_pick<T>(
     result: Result<Option<Vec<T>>, InquireError>,
@@ -1558,5 +1569,11 @@ mod tests {
     #[test]
     fn classify_pick_real_errors_propagate() {
         assert!(classify_pick::<u8>(Err(InquireError::NotTTY), false).is_err());
+    }
+
+    #[test]
+    fn episode_picker_help_reflects_back_context() {
+        assert!(episode_picker_help(true).ends_with("Esc：返回上一步"));
+        assert!(episode_picker_help(false).ends_with("Esc：取消"));
     }
 }
