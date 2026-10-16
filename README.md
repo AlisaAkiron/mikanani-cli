@@ -97,6 +97,7 @@ mikan qbt set [名称]        # 交互式创建/更新配置（默认名称为 "
 mikan qbt list              # 列出已保存的配置
 mikan qbt test [名称]       # 连接并打印 qBittorrent 版本
 mikan qbt remove <名称>     # 删除一个配置
+mikan qbt migrate [名称]    # 将密码迁移到另一种保存方式（明文 / 系统密钥环 / 1Password）
 ```
 
 `qbt set` 和 `qbt test` 都会在保存前先尝试连接，因此地址或凭据的笔误可以被
@@ -172,6 +173,42 @@ mikan --proxy http://127.0.0.1:7890 "https://mikanani.me/RSS/..."
 由于该文件可能包含 qBittorrent 密码，它会以原子方式写入，并在 Unix 上设置为仅属主
 可读写（`0600`）权限。如果文件某天变得无法解析，它会被移动到 `config.toml.bak` 而
 不是被静默覆盖，因此已保存的配置绝不会丢失。
+
+### 不以明文保存密码
+
+设置 qBittorrent 配置（`mikan qbt set` 或首次添加时）会询问密码保存方式：明文、系统
+密钥环（显示当前系统使用的密钥环，可用时为默认选项）或 1Password（需安装 `op` CLI）。
+选择系统密钥环时，密码会被直接写入密钥环，配置文件中只保存一个引用。
+
+已有的配置可以用 `mikan qbt migrate [名称]` 更换保存方式：它会先读出当前密码，写入
+新位置并确认能读回相同的密码后才改写配置；从系统密钥环迁出时会询问是否删除旧条目。
+mikan 不会写入 1Password —— 迁移到 1Password 时请先在其中保存密码，再填写密码引用。
+
+配置文件中的 `password` 字段因此可以是以下任意一种，真正的密码在连接 qBittorrent 时
+才会被读取：
+
+| 写法 | 来源 |
+| --- | --- |
+| `hunter2` | 明文（默认） |
+| `onepassword://op://<保险库>/<条目>/<字段>` | 通过 1Password CLI 执行 `op read` 读取（需已安装 `op` 并登录） |
+| `keyring://<条目名>` | 系统密钥环：Linux 上的 Secret Service（GNOME Keyring / KWallet）、macOS 钥匙串、Windows 凭据管理器 |
+
+密钥环条目的服务名固定为 `mikanani-cli`，账户名为 `<条目名>`。例如对
+`keyring://seedbox`：
+
+```bash
+# Linux
+secret-tool store --label="mikanani-cli seedbox" service mikanani-cli username seedbox
+# macOS
+security add-generic-password -s mikanani-cli -a seedbox -w
+```
+
+```toml
+[qbt.seedbox]
+endpoint = "http://10.0.0.2:8080"
+username = "admin"
+password = "keyring://seedbox"
+```
 
 ## 退出码
 
