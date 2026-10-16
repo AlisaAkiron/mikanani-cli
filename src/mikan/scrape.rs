@@ -179,8 +179,8 @@ pub fn subgroups(client: &reqwest::blocking::Client, bangumi_id: u32) -> Result<
 mod tests {
     use super::*;
 
-    const SEARCH: &str = include_str!("../tests/fixtures/mikan_search.html");
-    const BANGUMI: &str = include_str!("../tests/fixtures/mikan_bangumi.html");
+    const SEARCH: &str = include_str!("../../tests/fixtures/mikan_search.html");
+    const BANGUMI: &str = include_str!("../../tests/fixtures/mikan_bangumi.html");
 
     #[test]
     fn parse_shows_extracts_and_dedups() {

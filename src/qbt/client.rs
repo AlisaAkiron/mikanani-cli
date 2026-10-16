@@ -26,7 +26,7 @@ impl std::fmt::Debug for QbtClient {
 impl QbtClient {
     /// Logs in when the profile has a username (empty = qBt's localhost
     /// auth bypass), then verifies connectivity via /app/version. The stored
-    /// password may be a secret reference; see [`crate::secret::resolve`].
+    /// password may be a secret reference; see [`crate::qbt::secret::resolve`].
     pub fn connect(profile: &QbtProfile) -> anyhow::Result<QbtClient> {
         let http = reqwest::blocking::Client::builder()
             .no_proxy()
@@ -40,7 +40,7 @@ impl QbtClient {
             version: String::new(),
         };
         if !profile.username.is_empty() {
-            let password = crate::secret::resolve(&profile.password)?;
+            let password = crate::qbt::secret::resolve(&profile.password)?;
             client.login(&profile.username, &password)?;
         }
         client.version = client.fetch_version()?;

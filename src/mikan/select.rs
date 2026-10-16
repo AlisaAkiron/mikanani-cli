@@ -1,4 +1,4 @@
-use crate::feed::Episode;
+use crate::mikan::feed::Episode;
 
 /// Sort newest-first, but only when every episode is dated — otherwise trust
 /// the feed's own (already newest-first) order. ISO 8601 date strings compare
