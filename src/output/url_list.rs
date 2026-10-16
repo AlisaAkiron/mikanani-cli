@@ -1,4 +1,4 @@
-use crate::feed::Episode;
+use crate::mikan::feed::Episode;
 use crate::sanitize::sanitize_stem;
 use anyhow::Context;
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ pub fn write_url_list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::feed::Episode;
+    use crate::mikan::feed::Episode;
 
     fn ep(title: &str, url: &str) -> Episode {
         Episode {

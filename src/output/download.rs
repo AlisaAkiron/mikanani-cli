@@ -1,4 +1,4 @@
-use crate::feed::Episode;
+use crate::mikan::feed::Episode;
 use crate::sanitize::torrent_filename;
 use anyhow::Context;
 use std::path::{Path, PathBuf};
@@ -46,7 +46,7 @@ pub(crate) fn fetch_bytes(client: &reqwest::blocking::Client, url: &str) -> anyh
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::feed::Episode;
+    use crate::mikan::feed::Episode;
     use std::io::{Read, Write};
 
     /// One-shot HTTP server on an ephemeral port; returns the URL to hit.
@@ -141,7 +141,7 @@ mod tests {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap();
-        let feed = crate::feed::fetch_feed(
+        let feed = crate::mikan::feed::fetch_feed(
             &client,
             "https://mikanani.me/RSS/Bangumi?bangumiId=3950&subgroupid=597",
         )

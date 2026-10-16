@@ -140,7 +140,7 @@ fn append_text(path: &[String], feed: &mut Feed, current: &mut Option<Episode>, 
 mod tests {
     use super::*;
 
-    const FIXTURE: &str = include_str!("../tests/fixtures/dr_stone.xml");
+    const FIXTURE: &str = include_str!("../../tests/fixtures/dr_stone.xml");
 
     #[test]
     fn parses_real_feed() {
