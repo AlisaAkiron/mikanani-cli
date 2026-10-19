@@ -29,9 +29,21 @@ $ mikan "https://mikanani.me/RSS/Bangumi?bangumiId=3950&subgroupid=597"
 
 ## 安装
 
-需要较新的 Rust 工具链（edition 2024，Rust 1.85 及以上）。
+### 从 Release 下载
+
+可以从 [Release](https://github.com/AlisaAkiron/mikanani-cli/releases) 中下载对应平台的二进制文件。
 
 ### 从源码构建
+
+需要较新的 Rust 工具链（edition 2024，Rust 1.85 及以上）。
+
+安装已发布的最新版：
+
+```sh
+cargo install mikanani-cli
+```
+
+或者从本仓库直接构建：
 
 ```sh
 git clone <本仓库地址> mikanani-cli
